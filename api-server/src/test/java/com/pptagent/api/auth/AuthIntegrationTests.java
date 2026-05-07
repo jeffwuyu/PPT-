@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pptagent.api.auth.dto.RegisterRequest;
 import com.pptagent.domain.auth.ProjectMemberEntity;
 import com.pptagent.domain.auth.ProjectRole;
+import com.pptagent.domain.auth.UserRoleEntity;
 import com.pptagent.domain.auth.repository.ProjectMemberRepository;
 import com.pptagent.domain.auth.repository.RoleRepository;
 import com.pptagent.domain.auth.repository.UserLevelRepository;
 import com.pptagent.domain.auth.repository.UserRepository;
+import com.pptagent.domain.auth.repository.UserRoleRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -54,6 +56,9 @@ class AuthIntegrationTests {
 
     @Autowired
     private ProjectMemberRepository projectMemberRepository;
+
+    @Autowired
+    private UserRoleRepository userRoleRepository;
 
     @Test
     void registerLoginAndReadCurrentUserWithJwt() throws Exception {
@@ -155,8 +160,10 @@ class AuthIntegrationTests {
         assertThat(permissionPolicyService.canEditProject(user.getId(), projectId)).isFalse();
 
         user.changeLevel(userLevelRepository.findByCode("PRO").orElseThrow());
-        user.addRole(roleRepository.findByCode("ROLE_EDITOR").orElseThrow());
-        projectMemberRepository.save(new ProjectMemberEntity(projectId, user, ProjectRole.EDITOR, true));
+        userRepository.updateById(user);
+        var editorRole = roleRepository.findByCode("ROLE_EDITOR").orElseThrow();
+        userRoleRepository.insert(new UserRoleEntity(user.getId(), editorRole.getId()));
+        projectMemberRepository.insert(new ProjectMemberEntity(projectId, user, ProjectRole.EDITOR, true));
 
         assertThat(permissionPolicyService.hasLevelAtLeast(user.getId(), "PRO")).isTrue();
         assertThat(permissionPolicyService.hasGlobalPermission(user.getId(), "PROJECT_EDIT")).isTrue();

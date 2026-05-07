@@ -37,7 +37,7 @@
   - 定义当前基础阶段启用的模块清单，用于健康检查。
 
 - `domain/pom.xml`
-  - 创建领域模块，依赖 `common` 并接入 Spring Data JPA。
+  - 创建领域模块，依赖 `common` 并接入 MyBatis-Plus core，用于表模型注解和 Mapper 类型。
 
 - `domain/src/main/java/com/pptagent/domain/DomainModule.java`
   - 添加领域模块标记类。

@@ -8,25 +8,24 @@ import com.pptagent.domain.auth.RoleEntity;
 import com.pptagent.domain.auth.UserEntity;
 import com.pptagent.domain.auth.repository.ProjectMemberRepository;
 import com.pptagent.domain.auth.repository.UserLevelRepository;
-import com.pptagent.domain.auth.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PermissionPolicyService {
 
-    private final UserRepository userRepository;
     private final UserLevelRepository userLevelRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final UserAccessGraphService userAccessGraphService;
 
     public PermissionPolicyService(
-            UserRepository userRepository,
             UserLevelRepository userLevelRepository,
-            ProjectMemberRepository projectMemberRepository
+            ProjectMemberRepository projectMemberRepository,
+            UserAccessGraphService userAccessGraphService
     ) {
-        this.userRepository = userRepository;
         this.userLevelRepository = userLevelRepository;
         this.projectMemberRepository = projectMemberRepository;
+        this.userAccessGraphService = userAccessGraphService;
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +55,7 @@ public class PermissionPolicyService {
     }
 
     private UserEntity loadUser(Long userId) {
-        return userRepository.findWithRolesById(userId)
+        return userAccessGraphService.findById(userId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "User not found"));
     }
 }

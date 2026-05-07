@@ -20,8 +20,8 @@
   - `FileType` 内置允许的 content type 和扩展名，用于上传前校验。
 
 - `domain/src/main/java/com/pptagent/domain/file/repository/FileAssetRepository.java`
-  - 新增文件元数据 Repository。
-  - 查询文件时通过 `EntityGraph` 同步加载 owner，支持鉴权判断。
+  - 新增文件元数据 MyBatis-Plus Mapper。
+  - 文件归属通过 `owner_user_id` 标量字段判断，支持鉴权判断。
 
 - `infrastructure/src/main/java/com/pptagent/infrastructure/config/CosStorageProperties.java`
   - 增加 `mockFailUpload` 配置，用于测试 COS 上传失败路径。
@@ -108,7 +108,7 @@ mvn test
 - 测试数量：`Tests run: 13, Failures: 0, Errors: 0, Skipped: 0`
 - 覆盖场景：
   - Phase 01/02 原有上下文、认证、权限测试继续通过。
-  - Flyway 成功应用 2 个 migration，JPA validate 通过。
+  - Flyway 成功应用 2 个 migration，MyBatis-Plus Mapper 读写通过。
   - 合法文件可创建 presigned upload token。
   - presigned 上传完成后状态变为 `AVAILABLE`。
   - 服务端上传可保存元数据并返回 Mock COS public URL。
@@ -122,7 +122,7 @@ mvn test
 
 - COS：默认使用 `MockObjectStorageClient`，未调用真实腾讯云 COS。
 - COS API Key：本阶段不需要真实 `secretId`、`secretKey`、bucket 或 region。
-- MySQL：生产配置指向 MySQL；测试使用 H2 MySQL mode 通过 Flyway 和 JPA validate 验证表结构。
+- MySQL：生产配置指向 MySQL；测试使用 H2 MySQL mode 通过 Flyway 和 MyBatis-Plus 读写验证表结构。
 - Redis：本阶段未执行 Redis 读写。
 - LLM/MCP/Skill：本阶段未调用。
 

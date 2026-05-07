@@ -1,61 +1,31 @@
 package com.pptagent.domain.auth;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.JoinTable;
-import jakarta.persistence.ManyToMany;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 
-@Entity
-@Table(name = "users")
+@TableName("users")
 public class UserEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @Column(nullable = false, unique = true, length = 180)
     private String email;
-
-    @Column(nullable = false, unique = true, length = 80)
     private String username;
-
-    @Column(nullable = false)
     private String passwordHash;
+    private Long levelId;
+    private UserStatus status;
+    private Instant createdAt;
+    private Instant updatedAt;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "level_id", nullable = false)
+    @TableField(exist = false)
     private UserLevelEntity level;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    private UserStatus status;
-
-    @ManyToMany(fetch = FetchType.EAGER)
-    @JoinTable(
-            name = "user_roles",
-            joinColumns = @JoinColumn(name = "user_id"),
-            inverseJoinColumns = @JoinColumn(name = "role_id")
-    )
+    @TableField(exist = false)
     private Set<RoleEntity> roles = new HashSet<>();
-
-    @Column(nullable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
 
     protected UserEntity() {
     }
@@ -64,7 +34,7 @@ public class UserEntity {
         this.email = email;
         this.username = username;
         this.passwordHash = passwordHash;
-        this.level = level;
+        changeLevel(level);
         this.status = UserStatus.ACTIVE;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
@@ -86,6 +56,10 @@ public class UserEntity {
         return passwordHash;
     }
 
+    public Long getLevelId() {
+        return levelId;
+    }
+
     public UserLevelEntity getLevel() {
         return level;
     }
@@ -98,13 +72,22 @@ public class UserEntity {
         return roles;
     }
 
+    public void setLevel(UserLevelEntity level) {
+        this.level = level;
+        this.levelId = level == null ? null : level.getId();
+    }
+
+    public void setRoles(Set<RoleEntity> roles) {
+        this.roles = roles == null ? new HashSet<>() : roles;
+    }
+
     public void addRole(RoleEntity role) {
         this.roles.add(role);
         this.updatedAt = Instant.now();
     }
 
     public void changeLevel(UserLevelEntity level) {
-        this.level = level;
+        setLevel(level);
         this.updatedAt = Instant.now();
     }
 }

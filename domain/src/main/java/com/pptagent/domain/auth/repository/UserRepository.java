@@ -1,20 +1,26 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.UserEntity;
-import org.springframework.data.jpa.repository.EntityGraph;
-import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
-public interface UserRepository extends JpaRepository<UserEntity, Long> {
+public interface UserRepository extends BaseMapper<UserEntity> {
 
-    boolean existsByEmail(String email);
+    default boolean existsByEmail(String email) {
+        return selectCount(new QueryWrapper<UserEntity>().eq("email", email)) > 0;
+    }
 
-    boolean existsByUsername(String username);
+    default boolean existsByUsername(String username) {
+        return selectCount(new QueryWrapper<UserEntity>().eq("username", username)) > 0;
+    }
 
-    @EntityGraph(attributePaths = {"level", "roles", "roles.permissions"})
-    Optional<UserEntity> findByEmail(String email);
+    default Optional<UserEntity> findByEmail(String email) {
+        return Optional.ofNullable(selectOne(new QueryWrapper<UserEntity>().eq("email", email)));
+    }
 
-    @EntityGraph(attributePaths = {"level", "roles", "roles.permissions"})
-    Optional<UserEntity> findWithRolesById(Long id);
+    default Optional<UserEntity> findWithRolesById(Long id) {
+        return Optional.ofNullable(selectById(id));
+    }
 }

@@ -1,29 +1,17 @@
 package com.pptagent.domain.auth;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.Instant;
 
-@Entity
-@Table(name = "permissions")
+@TableName("permissions")
 public class PermissionEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @Column(nullable = false, unique = true, length = 80)
     private String code;
-
-    @Column(nullable = false)
     private String description;
-
-    @Column(nullable = false)
     private Instant createdAt;
 
     protected PermissionEntity() {

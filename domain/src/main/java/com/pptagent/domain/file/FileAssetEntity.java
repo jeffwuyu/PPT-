@@ -1,67 +1,32 @@
 package com.pptagent.domain.file;
 
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 import com.pptagent.domain.auth.UserEntity;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
 
 import java.time.Instant;
 
-@Entity
-@Table(name = "file_assets")
+@TableName("file_assets")
 public class FileAssetEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "owner_user_id", nullable = false)
-    private UserEntity owner;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 40)
+    private Long ownerUserId;
     private FileType fileType;
-
-    @Column(nullable = false)
     private String originalFilename;
-
-    @Column(nullable = false, length = 120)
     private String contentType;
-
-    @Column(nullable = false)
     private long byteSize;
-
-    @Column(nullable = false, unique = true, length = 500)
     private String objectKey;
-
-    @Column(length = 1000)
     private String publicUrl;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
     private FileAssetStatus status;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
     private FileUploadMode uploadMode;
-
-    @Column(length = 1000)
     private String failureReason;
-
-    @Column(nullable = false)
     private Instant createdAt;
-
-    @Column(nullable = false)
     private Instant updatedAt;
+
+    @TableField(exist = false)
+    private UserEntity owner;
 
     protected FileAssetEntity() {
     }
@@ -76,6 +41,7 @@ public class FileAssetEntity {
             FileUploadMode uploadMode
     ) {
         this.owner = owner;
+        this.ownerUserId = owner.getId();
         this.fileType = fileType;
         this.originalFilename = originalFilename;
         this.contentType = contentType;
@@ -89,6 +55,10 @@ public class FileAssetEntity {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
     }
 
     public UserEntity getOwner() {
@@ -129,6 +99,11 @@ public class FileAssetEntity {
 
     public String getFailureReason() {
         return failureReason;
+    }
+
+    public void setOwner(UserEntity owner) {
+        this.owner = owner;
+        this.ownerUserId = owner == null ? null : owner.getId();
     }
 
     public void markAvailable(String publicUrl) {

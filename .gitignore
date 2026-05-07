@@ -2,8 +2,10 @@ target/
 .m2/repository/
 .idea/
 .vscode/
+.claude/
 *.iml
 .mvn/wrapper/maven-wrapper.jar
 logs/
 *.log
 temp/
+api-server/src/main/resources/application-local.yml

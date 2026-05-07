@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:classpath:application-local.yml
   application:
     name: ppt-agent-platform
   datasource:
@@ -6,10 +8,6 @@ spring:
     username: ${PPT_MYSQL_USERNAME:root}
     password: ${PPT_MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
-  jpa:
-    open-in-view: false
-    hibernate:
-      ddl-auto: validate
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -17,6 +15,14 @@ spring:
     redis:
       host: ${PPT_REDIS_HOST:localhost}
       port: ${PPT_REDIS_PORT:6379}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
 
 management:
   endpoints:

@@ -1,14 +1,14 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.RefreshTokenEntity;
-import com.pptagent.domain.auth.UserEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
-public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity, Long> {
+public interface RefreshTokenRepository extends BaseMapper<RefreshTokenEntity> {
 
-    Optional<RefreshTokenEntity> findByTokenHash(String tokenHash);
-
-    void deleteByUser(UserEntity user);
+    default Optional<RefreshTokenEntity> findByTokenHash(String tokenHash) {
+        return Optional.ofNullable(selectOne(new QueryWrapper<RefreshTokenEntity>().eq("token_hash", tokenHash)));
+    }
 }

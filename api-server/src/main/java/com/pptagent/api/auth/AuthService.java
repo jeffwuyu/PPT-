@@ -11,12 +11,14 @@ import com.pptagent.domain.auth.AuditLogEntity;
 import com.pptagent.domain.auth.PermissionEntity;
 import com.pptagent.domain.auth.RefreshTokenEntity;
 import com.pptagent.domain.auth.RoleEntity;
+import com.pptagent.domain.auth.UserRoleEntity;
 import com.pptagent.domain.auth.UserEntity;
 import com.pptagent.domain.auth.repository.AuditLogRepository;
 import com.pptagent.domain.auth.repository.RefreshTokenRepository;
 import com.pptagent.domain.auth.repository.RoleRepository;
 import com.pptagent.domain.auth.repository.UserLevelRepository;
 import com.pptagent.domain.auth.repository.UserRepository;
+import com.pptagent.domain.auth.repository.UserRoleRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,8 +41,10 @@ public class AuthService {
     private final UserRepository userRepository;
     private final UserLevelRepository userLevelRepository;
     private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuditLogRepository auditLogRepository;
+    private final UserAccessGraphService userAccessGraphService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
@@ -49,8 +53,10 @@ public class AuthService {
             UserRepository userRepository,
             UserLevelRepository userLevelRepository,
             RoleRepository roleRepository,
+            UserRoleRepository userRoleRepository,
             RefreshTokenRepository refreshTokenRepository,
             AuditLogRepository auditLogRepository,
+            UserAccessGraphService userAccessGraphService,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             JwtProperties jwtProperties
@@ -58,8 +64,10 @@ public class AuthService {
         this.userRepository = userRepository;
         this.userLevelRepository = userLevelRepository;
         this.roleRepository = roleRepository;
+        this.userRoleRepository = userRoleRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.auditLogRepository = auditLogRepository;
+        this.userAccessGraphService = userAccessGraphService;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
@@ -80,20 +88,22 @@ public class AuthService {
         RoleEntity role = roleRepository.findByCode(DEFAULT_ROLE)
                 .orElseThrow(() -> new PlatformException(ErrorCode.INTERNAL_ERROR, "Default user role missing"));
         UserEntity user = new UserEntity(email, request.username(), passwordEncoder.encode(request.password()), level);
-        user.addRole(role);
-        userRepository.save(user);
-        auditLogRepository.save(new AuditLogEntity(user, "AUTH_REGISTER", "USER", String.valueOf(user.getId()), "User registered"));
-        return issueTokens(user);
+        userRepository.insert(user);
+        userRoleRepository.insert(new UserRoleEntity(user.getId(), role.getId()));
+        UserEntity loadedUser = userAccessGraphService.findById(user.getId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.INTERNAL_ERROR, "Created user missing"));
+        auditLogRepository.insert(new AuditLogEntity(loadedUser, "AUTH_REGISTER", "USER", String.valueOf(loadedUser.getId()), "User registered"));
+        return issueTokens(loadedUser);
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        UserEntity user = userRepository.findByEmail(normalizeEmail(request.email()))
+        UserEntity user = userAccessGraphService.findByEmail(normalizeEmail(request.email()))
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHORIZED, "Invalid email or password"));
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new PlatformException(ErrorCode.UNAUTHORIZED, "Invalid email or password");
         }
-        auditLogRepository.save(new AuditLogEntity(user, "AUTH_LOGIN", "USER", String.valueOf(user.getId()), "User logged in"));
+        auditLogRepository.insert(new AuditLogEntity(user, "AUTH_LOGIN", "USER", String.valueOf(user.getId()), "User logged in"));
         return issueTokens(user);
     }
 
@@ -105,25 +115,29 @@ public class AuthService {
             throw new PlatformException(ErrorCode.UNAUTHORIZED, "Invalid refresh token");
         }
         refreshToken.revoke();
-        UserEntity user = userRepository.findByEmail(refreshToken.getUser().getEmail())
+        refreshTokenRepository.updateById(refreshToken);
+        UserEntity user = userAccessGraphService.findById(refreshToken.getUserId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHORIZED, "User not found"));
-        auditLogRepository.save(new AuditLogEntity(user, "AUTH_REFRESH", "USER", String.valueOf(user.getId()), "Refresh token rotated"));
+        auditLogRepository.insert(new AuditLogEntity(user, "AUTH_REFRESH", "USER", String.valueOf(user.getId()), "Refresh token rotated"));
         return issueTokens(user);
     }
 
     @Transactional
     public void logout(String email, String refreshToken) {
-        UserEntity user = userRepository.findByEmail(normalizeEmail(email))
+        UserEntity user = userAccessGraphService.findByEmail(normalizeEmail(email))
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHORIZED, "User not found"));
         if (refreshToken != null && !refreshToken.isBlank()) {
-            refreshTokenRepository.findByTokenHash(hash(refreshToken)).ifPresent(RefreshTokenEntity::revoke);
+            refreshTokenRepository.findByTokenHash(hash(refreshToken)).ifPresent(token -> {
+                token.revoke();
+                refreshTokenRepository.updateById(token);
+            });
         }
-        auditLogRepository.save(new AuditLogEntity(user, "AUTH_LOGOUT", "USER", String.valueOf(user.getId()), "User logged out"));
+        auditLogRepository.insert(new AuditLogEntity(user, "AUTH_LOGOUT", "USER", String.valueOf(user.getId()), "User logged out"));
     }
 
     @Transactional(readOnly = true)
     public UserProfileResponse profile(String email) {
-        UserEntity user = userRepository.findByEmail(normalizeEmail(email))
+        UserEntity user = userAccessGraphService.findByEmail(normalizeEmail(email))
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHORIZED, "User not found"));
         return toProfile(user);
     }
@@ -136,7 +150,7 @@ public class AuthService {
                 hash(rawRefreshToken),
                 Instant.now().plus(jwtProperties.refreshTokenTtl())
         );
-        refreshTokenRepository.save(refreshToken);
+        refreshTokenRepository.insert(refreshToken);
         return new AuthResponse(accessToken.token(), rawRefreshToken, accessToken.expiresAt(), toProfile(user));
     }
 

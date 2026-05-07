@@ -1,7 +1,7 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.AuditLogEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface AuditLogRepository extends JpaRepository<AuditLogEntity, Long> {
+public interface AuditLogRepository extends BaseMapper<AuditLogEntity> {
 }

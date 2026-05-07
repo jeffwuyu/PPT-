@@ -1,10 +1,10 @@
 package com.pptagent.api.security;
 
+import com.pptagent.api.auth.UserAccessGraphService;
 import com.pptagent.domain.auth.PermissionEntity;
 import com.pptagent.domain.auth.RoleEntity;
 import com.pptagent.domain.auth.UserEntity;
 import com.pptagent.domain.auth.UserStatus;
-import com.pptagent.domain.auth.repository.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -17,16 +17,16 @@ import java.util.stream.Stream;
 @Service
 public class PlatformUserDetailsService implements UserDetailsService {
 
-    private final UserRepository userRepository;
+    private final UserAccessGraphService userAccessGraphService;
 
-    public PlatformUserDetailsService(UserRepository userRepository) {
-        this.userRepository = userRepository;
+    public PlatformUserDetailsService(UserAccessGraphService userAccessGraphService) {
+        this.userAccessGraphService = userAccessGraphService;
     }
 
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        UserEntity user = userRepository.findByEmail(email)
+        UserEntity user = userAccessGraphService.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
         return toUserDetails(user);
     }

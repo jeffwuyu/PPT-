@@ -51,7 +51,7 @@ public class FileService {
         validateFile(request.fileType(), request.originalFilename(), request.contentType(), request.byteSize());
         UserEntity owner = loadUser(userId);
         String objectKey = buildObjectKey(userId, request.fileType().name(), request.originalFilename());
-        FileAssetEntity asset = fileAssetRepository.save(new FileAssetEntity(
+        FileAssetEntity asset = new FileAssetEntity(
                 owner,
                 request.fileType(),
                 request.originalFilename(),
@@ -59,7 +59,8 @@ public class FileService {
                 request.byteSize(),
                 objectKey,
                 FileUploadMode.PRESIGNED
-        ));
+        );
+        fileAssetRepository.insert(asset);
         PresignedUpload presignedUpload = objectStorageClient.createPresignedUpload(
                 objectKey,
                 request.contentType(),
@@ -72,6 +73,7 @@ public class FileService {
     public FileAssetResponse completeUpload(Long userId, Long fileId) {
         FileAssetEntity asset = loadOwnedAsset(userId, fileId);
         asset.markAvailable(objectStorageClient.publicUrl(asset.getObjectKey()));
+        fileAssetRepository.updateById(asset);
         return toResponse(asset);
     }
 
@@ -80,7 +82,7 @@ public class FileService {
         validateFile(fileType, safeOriginalFilename(file), safeContentType(file), file.getSize());
         UserEntity owner = loadUser(userId);
         String objectKey = buildObjectKey(userId, fileType.name(), safeOriginalFilename(file));
-        FileAssetEntity asset = fileAssetRepository.save(new FileAssetEntity(
+        FileAssetEntity asset = new FileAssetEntity(
                 owner,
                 fileType,
                 safeOriginalFilename(file),
@@ -88,14 +90,17 @@ public class FileService {
                 file.getSize(),
                 objectKey,
                 FileUploadMode.SERVER
-        ));
+        );
+        fileAssetRepository.insert(asset);
 
         try {
             StoredObject storedObject = uploadWithRetry(objectKey, safeContentType(file), file.getBytes());
             asset.markAvailable(storedObject.publicUrl());
+            fileAssetRepository.updateById(asset);
             return toResponse(asset);
         } catch (IOException | ObjectStorageException exception) {
             asset.markFailed(exception.getMessage());
+            fileAssetRepository.updateById(asset);
             throw new PlatformException(ErrorCode.EXTERNAL_SERVICE_ERROR, "File upload failed");
         }
     }
@@ -133,7 +138,7 @@ public class FileService {
     private FileAssetEntity loadOwnedAsset(Long userId, Long fileId) {
         FileAssetEntity asset = fileAssetRepository.findWithOwnerById(fileId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "File not found"));
-        if (!asset.getOwner().getId().equals(userId)) {
+        if (!asset.getOwnerUserId().equals(userId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "File does not belong to current user");
         }
         return asset;

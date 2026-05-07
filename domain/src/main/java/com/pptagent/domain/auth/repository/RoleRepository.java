@@ -1,13 +1,14 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.RoleEntity;
-import org.springframework.data.jpa.repository.EntityGraph;
-import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
-public interface RoleRepository extends JpaRepository<RoleEntity, Long> {
+public interface RoleRepository extends BaseMapper<RoleEntity> {
 
-    @EntityGraph(attributePaths = "permissions")
-    Optional<RoleEntity> findByCode(String code);
+    default Optional<RoleEntity> findByCode(String code) {
+        return Optional.ofNullable(selectOne(new QueryWrapper<RoleEntity>().eq("code", code)));
+    }
 }

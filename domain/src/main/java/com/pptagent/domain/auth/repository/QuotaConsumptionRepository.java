@@ -1,7 +1,7 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.QuotaConsumptionEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface QuotaConsumptionRepository extends JpaRepository<QuotaConsumptionEntity, Long> {
+public interface QuotaConsumptionRepository extends BaseMapper<QuotaConsumptionEntity> {
 }

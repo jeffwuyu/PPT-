@@ -1,34 +1,22 @@
 package com.pptagent.domain.auth;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.Instant;
 
-@Entity
-@Table(name = "teams")
+@TableName("teams")
 public class TeamEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @Column(nullable = false, length = 120)
     private String name;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "owner_user_id", nullable = false)
-    private UserEntity owner;
-
-    @Column(nullable = false)
+    private Long ownerUserId;
     private Instant createdAt;
+
+    @TableField(exist = false)
+    private UserEntity owner;
 
     protected TeamEntity() {
     }
@@ -36,6 +24,7 @@ public class TeamEntity {
     public TeamEntity(String name, UserEntity owner) {
         this.name = name;
         this.owner = owner;
+        this.ownerUserId = owner.getId();
         this.createdAt = Instant.now();
     }
 }

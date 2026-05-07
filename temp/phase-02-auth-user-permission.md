@@ -20,7 +20,7 @@
   - 增加 `ppt.jwt` 配置，包括 issuer、secret、access token TTL、refresh token TTL。
 
 - `api-server/src/test/resources/application-test.yml`
-  - 测试环境启用 Flyway 与 JPA validate。
+  - 测试环境启用 Flyway，通过 H2 MySQL mode 验证迁移脚本和 MyBatis-Plus Mapper 读写。
   - 配置测试 JWT secret，access token TTL 设置为 `1s` 以验证过期拒绝。
 
 - `api-server/src/main/resources/db/migration/V1__auth_user_permission.sql`
@@ -33,11 +33,11 @@
   - 增加 `UserStatus`、`TokenStatus`、`ProjectRole` 枚举。
 
 - `domain/src/main/java/com/pptagent/domain/auth/repository/*`
-  - 增加用户、等级、角色、项目成员、刷新令牌、额度消耗、审计日志 Repository。
-  - 用户和角色查询使用 `EntityGraph` 加载等级、角色和权限，避免权限判断时懒加载丢上下文。
+  - 增加用户、等级、角色、项目成员、刷新令牌、额度消耗、审计日志 MyBatis-Plus Mapper。
+  - 用户和角色权限由 `UserAccessGraphService` 显式查询并组装等级、角色和权限。
 
 - `api-server/src/main/java/com/pptagent/api/ApiServerApplication.java`
-  - 显式增加 `@EntityScan` 和 `@EnableJpaRepositories`，支持多模块 JPA 实体与 Repository 扫描。
+  - 保留应用和配置属性扫描；MyBatis-Plus Mapper 扫描由 infrastructure 配置统一提供。
 
 - `api-server/src/main/java/com/pptagent/api/config/FoundationSecurityConfig.java`
   - 接入 JWT Filter。
@@ -98,7 +98,7 @@ mvn test
 - 测试数量：`Tests run: 7, Failures: 0, Errors: 0, Skipped: 0`
 - 覆盖场景：
   - Spring Boot 上下文启动成功。
-  - Flyway 建表并通过 JPA schema validate。
+  - Flyway 建表并通过 MyBatis-Plus Mapper 完成读写验证。
   - 注册成功并返回 access token 和 refresh token。
   - 登录成功。
   - 错误密码返回 401。
@@ -112,7 +112,7 @@ mvn test
 
 - LLM：本阶段未调用。
 - COS：本阶段未调用。
-- MySQL：生产配置指向 MySQL；测试使用 H2 内存数据库和 Flyway 验证表结构及 JPA 映射。
+- MySQL：生产配置指向 MySQL；测试使用 H2 内存数据库和 Flyway 验证表结构及 MyBatis-Plus 映射。
 - Redis：本阶段未执行 Redis 读写。
 - JWT：使用本地 JJWT 签发和校验，不依赖外部服务。
 

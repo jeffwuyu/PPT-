@@ -1,44 +1,24 @@
 package com.pptagent.domain.auth;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.Instant;
 
-@Entity
-@Table(name = "project_members", uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "user_id"}))
+@TableName("project_members")
 public class ProjectMemberEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @Column(nullable = false)
     private Long projectId;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
-    private UserEntity user;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 40)
+    private Long userId;
     private ProjectRole projectRole;
-
-    @Column(nullable = false)
     private boolean canEdit;
-
-    @Column(nullable = false)
     private Instant createdAt;
+
+    @TableField(exist = false)
+    private UserEntity user;
 
     protected ProjectMemberEntity() {
     }
@@ -46,6 +26,7 @@ public class ProjectMemberEntity {
     public ProjectMemberEntity(Long projectId, UserEntity user, ProjectRole projectRole, boolean canEdit) {
         this.projectId = projectId;
         this.user = user;
+        this.userId = user.getId();
         this.projectRole = projectRole;
         this.canEdit = canEdit;
         this.createdAt = Instant.now();

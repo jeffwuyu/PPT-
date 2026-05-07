@@ -1,38 +1,20 @@
 package com.pptagent.domain.auth;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.Instant;
 
-@Entity
-@Table(name = "user_levels")
+@TableName("user_levels")
 public class UserLevelEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId
     private Long id;
-
-    @Column(nullable = false, unique = true, length = 40)
     private String code;
-
-    @Column(nullable = false, length = 80)
     private String displayName;
-
-    @Column(nullable = false)
     private int rankOrder;
-
-    @Column(nullable = false)
     private int maxProjects;
-
-    @Column(nullable = false)
     private int agentDailyQuota;
-
-    @Column(nullable = false)
     private Instant createdAt;
 
     protected UserLevelEntity() {

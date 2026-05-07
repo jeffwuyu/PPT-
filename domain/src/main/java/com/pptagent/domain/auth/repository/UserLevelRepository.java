@@ -1,11 +1,14 @@
 package com.pptagent.domain.auth.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.UserLevelEntity;
-import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
-public interface UserLevelRepository extends JpaRepository<UserLevelEntity, Long> {
+public interface UserLevelRepository extends BaseMapper<UserLevelEntity> {
 
-    Optional<UserLevelEntity> findByCode(String code);
+    default Optional<UserLevelEntity> findByCode(String code) {
+        return Optional.ofNullable(selectOne(new QueryWrapper<UserLevelEntity>().eq("code", code)));
+    }
 }
