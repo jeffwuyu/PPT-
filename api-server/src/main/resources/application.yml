@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: ppt-agent-platform
+  datasource:
+    url: ${PPT_MYSQL_URL:jdbc:mysql://localhost:3306/ppt_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${PPT_MYSQL_USERNAME:root}
+    password: ${PPT_MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${PPT_REDIS_HOST:localhost}
+      port: ${PPT_REDIS_PORT:6379}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+ppt:
+  cos:
+    region: ${TENCENT_COS_REGION:}
+    bucket: ${TENCENT_COS_BUCKET:}
+    secret-id: ${TENCENT_COS_SECRET_ID:}
+    secret-key: ${TENCENT_COS_SECRET_KEY:}
+    public-base-url: ${TENCENT_COS_PUBLIC_BASE_URL:}
+    mock-enabled: ${PPT_COS_MOCK_ENABLED:true}
+    mock-fail-upload: ${PPT_COS_MOCK_FAIL_UPLOAD:false}
+  files:
+    max-upload-size: ${PPT_FILE_MAX_UPLOAD_SIZE:20MB}
+    presigned-upload-ttl: ${PPT_FILE_PRESIGNED_UPLOAD_TTL:10m}
+  redis:
+    namespace: ppt-agent
+    collaboration-topic: ppt-agent:collaboration
+    rag-index-name: ppt-agent:rag:images
+  collaboration:
+    websocket-endpoint: /ws/presentations
+    snapshot-interval-seconds: 30
+    yjs-persistence-enabled: true
+  agent:
+    default-model: ${PPT_AGENT_DEFAULT_MODEL:mock-llm}
+    max-plan-slides: 20
+    mock-llm-enabled: ${PPT_AGENT_MOCK_LLM_ENABLED:true}
+    mcp-tools-enabled: ${PPT_AGENT_MCP_TOOLS_ENABLED:true}
+  jwt:
+    issuer: ppt-agent-platform
+    secret: ${PPT_JWT_SECRET:change-me-change-me-change-me-change-me}
+    access-token-ttl: ${PPT_JWT_ACCESS_TTL:15m}
+    refresh-token-ttl: ${PPT_JWT_REFRESH_TTL:7d}
