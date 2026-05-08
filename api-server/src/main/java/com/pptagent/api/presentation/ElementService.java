@@ -98,7 +98,8 @@ public class ElementService {
         List<SlideElementEntity> remaining = slideElementRepository.findBySlideIdOrderByPageOrderAsc(element.getSlide().getId()).stream()
                 .filter(item -> !item.getId().equals(element.getId()))
                 .toList();
-        slideElementRepository.deleteById(element.getId());
+        element.markDeleted();
+        slideElementRepository.updateById(element);
         orderService.normalizeElementOrders(remaining);
     }
 
@@ -167,7 +168,8 @@ public class ElementService {
 
     private void deleteElementFromOperation(SlideEntity slide, PresentationRequests.ElementOperation operation) {
         SlideElementEntity element = requireBatchElement(slide, operation.elementId());
-        slideElementRepository.deleteById(element.getId());
+        element.markDeleted();
+        slideElementRepository.updateById(element);
     }
 
     private void reorderElementFromOperation(SlideEntity slide, PresentationRequests.ElementOperation operation) {

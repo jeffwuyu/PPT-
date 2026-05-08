@@ -30,6 +30,7 @@ public class SlideElementEntity {
     private String styleJson;
     private Instant createdAt;
     private Instant updatedAt;
+    private String isDeleted;
 
     @TableField(exist = false)
     private SlideEntity slide;
@@ -68,6 +69,7 @@ public class SlideElementEntity {
         this.styleJson = styleJson;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+        this.isDeleted = "0";
     }
 
     public Long getId() {
@@ -130,6 +132,10 @@ public class SlideElementEntity {
         return styleJson;
     }
 
+    public String getIsDeleted() {
+        return isDeleted;
+    }
+
     public void setSlide(SlideEntity slide) {
         this.slide = slide;
         this.slideId = slide == null ? null : slide.getId();
@@ -164,6 +170,11 @@ public class SlideElementEntity {
 
     public void changePageOrder(int pageOrder) {
         this.pageOrder = pageOrder;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markDeleted() {
+        this.isDeleted = "1";
         this.updatedAt = Instant.now();
     }
 }

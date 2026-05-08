@@ -11,8 +11,7 @@ create table file_assets (
     upload_mode varchar(30) not null,
     failure_reason varchar(1000) null,
     created_at timestamp not null,
-    updated_at timestamp not null,
-    constraint fk_file_assets_owner foreign key (owner_user_id) references users (id)
+    updated_at timestamp not null
 );
 
 create index idx_file_assets_owner on file_assets (owner_user_id);

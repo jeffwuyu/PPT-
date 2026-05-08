@@ -13,14 +13,19 @@ public interface SlideRepository extends BaseMapper<SlideEntity> {
     default List<SlideEntity> findByPresentationIdOrderByPageOrderAsc(Long presentationId) {
         return selectList(new QueryWrapper<SlideEntity>()
                 .eq("presentation_id", presentationId)
+                .eq("is_deleted", "0")
                 .orderByAsc("page_order", "id"));
     }
 
     default long countByPresentationId(Long presentationId) {
-        return selectCount(new QueryWrapper<SlideEntity>().eq("presentation_id", presentationId));
+        return selectCount(new QueryWrapper<SlideEntity>()
+                .eq("presentation_id", presentationId)
+                .eq("is_deleted", "0"));
     }
 
     default Optional<SlideEntity> findWithPresentationById(Long id) {
-        return Optional.ofNullable(selectById(id));
+        return Optional.ofNullable(selectOne(new QueryWrapper<SlideEntity>()
+                .eq("id", id)
+                .eq("is_deleted", "0")));
     }
 }

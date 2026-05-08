@@ -16,8 +16,7 @@ create table users (
     level_id bigint not null,
     status varchar(30) not null,
     created_at timestamp not null,
-    updated_at timestamp not null,
-    constraint fk_users_level foreign key (level_id) references user_levels (id)
+    updated_at timestamp not null
 );
 
 create table roles (
@@ -37,25 +36,20 @@ create table permissions (
 create table role_permissions (
     role_id bigint not null,
     permission_id bigint not null,
-    primary key (role_id, permission_id),
-    constraint fk_role_permissions_role foreign key (role_id) references roles (id),
-    constraint fk_role_permissions_permission foreign key (permission_id) references permissions (id)
+    primary key (role_id, permission_id)
 );
 
 create table user_roles (
     user_id bigint not null,
     role_id bigint not null,
-    primary key (user_id, role_id),
-    constraint fk_user_roles_user foreign key (user_id) references users (id),
-    constraint fk_user_roles_role foreign key (role_id) references roles (id)
+    primary key (user_id, role_id)
 );
 
 create table teams (
     id bigint auto_increment primary key,
     name varchar(120) not null,
     owner_user_id bigint not null,
-    created_at timestamp not null,
-    constraint fk_teams_owner foreign key (owner_user_id) references users (id)
+    created_at timestamp not null
 );
 
 create table project_members (
@@ -65,8 +59,8 @@ create table project_members (
     project_role varchar(40) not null,
     can_edit boolean not null,
     created_at timestamp not null,
-    unique (project_id, user_id),
-    constraint fk_project_members_user foreign key (user_id) references users (id)
+    is_deleted varchar(1) not null default '0',
+    unique (project_id, user_id)
 );
 
 create table refresh_tokens (
@@ -76,8 +70,7 @@ create table refresh_tokens (
     status varchar(30) not null,
     expires_at timestamp not null,
     revoked_at timestamp null,
-    created_at timestamp not null,
-    constraint fk_refresh_tokens_user foreign key (user_id) references users (id)
+    created_at timestamp not null
 );
 
 create table quota_consumptions (
@@ -86,8 +79,7 @@ create table quota_consumptions (
     quota_type varchar(60) not null,
     amount int not null,
     business_key varchar(120) not null,
-    created_at timestamp not null,
-    constraint fk_quota_consumptions_user foreign key (user_id) references users (id)
+    created_at timestamp not null
 );
 
 create table audit_logs (
@@ -97,8 +89,7 @@ create table audit_logs (
     resource_type varchar(80) not null,
     resource_id varchar(120) null,
     detail varchar(1000) null,
-    created_at timestamp not null,
-    constraint fk_audit_logs_user foreign key (user_id) references users (id)
+    created_at timestamp not null
 );
 
 insert into user_levels (code, display_name, rank_order, max_projects, agent_daily_quota, created_at)

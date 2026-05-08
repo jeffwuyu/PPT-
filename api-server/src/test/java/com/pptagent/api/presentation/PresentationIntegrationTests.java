@@ -2,6 +2,9 @@ package com.pptagent.api.presentation;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pptagent.domain.auth.repository.UserRepository;
+import com.pptagent.domain.presentation.repository.SlideElementRepository;
+import com.pptagent.domain.presentation.repository.SlideRepository;
 import com.pptagent.domain.auth.repository.ProjectMemberRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +38,15 @@ class PresentationIntegrationTests {
     @Autowired
     private ProjectMemberRepository projectMemberRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private SlideRepository slideRepository;
+
+    @Autowired
+    private SlideElementRepository slideElementRepository;
+
     @Test
     void presentationDefaultsOwnerMembershipAndReadPermissionsWork() throws Exception {
         String ownerToken = registerAndToken("ppt-owner");
@@ -60,6 +72,87 @@ class PresentationIntegrationTests {
 
         mockMvc.perform(get("/api/presentations/" + presentationId))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void presentationMembersCanBeSharedDowngradedAndRemoved() throws Exception {
+        RegisteredUser owner = registerUser("ppt-share-owner");
+        RegisteredUser member = registerUser("ppt-share-member");
+        RegisteredUser outsider = registerUser("ppt-share-outsider");
+        long presentationId = createPresentation(owner.token(), "Shared Deck").at("/data/id").asLong();
+
+        mockMvc.perform(get("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token()))
+                .andExpect(status().isForbidden());
+
+        sharePresentationMember(owner.token(), presentationId, member.email(), false)
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token()))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/presentations/" + presentationId + "/preview")
+                        .header("Authorization", "Bearer " + member.token()))
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"Viewer edit","pageWidth":1280,"pageHeight":720}
+                                """))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/presentations/" + presentationId + "/slides")
+                        .header("Authorization", "Bearer " + member.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"Viewer slide"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        sharePresentationMember(owner.token(), presentationId, member.email(), true)
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"Editor edit","pageWidth":1280,"pageHeight":720}
+                                """))
+                .andExpect(status().isOk());
+        createSlide(member.token(), presentationId, null, "Editor slide");
+
+        sharePresentationMember(member.token(), presentationId, outsider.email(), false)
+                .andExpect(status().isForbidden());
+        removePresentationMember(member.token(), presentationId, outsider.email())
+                .andExpect(status().isForbidden());
+
+        sharePresentationMember(owner.token(), presentationId, member.email(), false)
+                .andExpect(status().isOk());
+        mockMvc.perform(patch("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"Downgraded edit","pageWidth":1280,"pageHeight":720}
+                                """))
+                .andExpect(status().isForbidden());
+
+        sharePresentationMember(owner.token(), presentationId, owner.email(), false)
+                .andExpect(status().isBadRequest());
+        removePresentationMember(owner.token(), presentationId, owner.email())
+                .andExpect(status().isBadRequest());
+
+        removePresentationMember(owner.token(), presentationId, member.email())
+                .andExpect(status().isNoContent());
+        Long memberUserId = userId(member.email());
+        assertThat(projectMemberRepository.findByProjectIdAndUserId(presentationId, memberUserId)).isEmpty();
+        mockMvc.perform(get("/api/presentations/" + presentationId)
+                        .header("Authorization", "Bearer " + member.token()))
+                .andExpect(status().isForbidden());
+
+        var removedMember = projectMemberRepository.findAnyByProjectIdAndUserId(presentationId, memberUserId)
+                .orElseThrow();
+        assertThat(removedMember.getIsDeleted()).isEqualTo("1");
+        sharePresentationMember(owner.token(), presentationId, member.email(), true)
+                .andExpect(status().isOk());
+        assertThat(projectMemberRepository.findByProjectIdAndUserId(presentationId, memberUserId)).isPresent();
     }
 
     @Test
@@ -91,6 +184,18 @@ class PresentationIntegrationTests {
         assertThat(movedResponse.at("/data/slides/0/id").asLong()).isEqualTo(firstSlideId);
         assertThat(movedResponse.at("/data/slides/1/id").asLong()).isEqualTo(insertedSlideId);
 
+        long elementId = createElement(token, firstSlideId, """
+                {
+                  "type":"TEXT",
+                  "x":1,
+                  "y":1,
+                  "width":100,
+                  "height":40,
+                  "content":{"text":"Deleted with slide"},
+                  "style":{}
+                }
+                """).at("/data/id").asLong();
+
         JsonNode afterDelete = objectMapper.readTree(mockMvc.perform(delete("/api/slides/" + firstSlideId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -101,6 +206,10 @@ class PresentationIntegrationTests {
         assertThat(afterDelete.at("/data/slides").size()).isEqualTo(1);
         assertThat(afterDelete.at("/data/slides/0/id").asLong()).isEqualTo(insertedSlideId);
         assertThat(afterDelete.at("/data/slides/0/pageOrder").asInt()).isEqualTo(1);
+        assertThat(slideRepository.findWithPresentationById(firstSlideId)).isEmpty();
+        assertThat(slideRepository.selectById(firstSlideId).getIsDeleted()).isEqualTo("1");
+        assertThat(slideElementRepository.findWithSlideAndPresentationById(elementId)).isEmpty();
+        assertThat(slideElementRepository.selectById(elementId).getIsDeleted()).isEqualTo("1");
     }
 
     @Test
@@ -209,6 +318,13 @@ class PresentationIntegrationTests {
                 .getResponse()
                 .getContentAsString());
         assertThat(oldVersion.at("/data/snapshot/slides/0/elements/1/content/text").asText()).isEqualTo("Original text");
+
+        mockMvc.perform(delete("/api/elements/" + imageElementId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
+        JsonNode afterElementDelete = readPreview(token, presentationId);
+        assertThat(afterElementDelete.at("/data/slides/0/elements").size()).isEqualTo(1);
+        assertThat(slideElementRepository.selectById(imageElementId).getIsDeleted()).isEqualTo("1");
     }
 
     @Test
@@ -339,8 +455,37 @@ class PresentationIntegrationTests {
         return fileId;
     }
 
+    private org.springframework.test.web.servlet.ResultActions sharePresentationMember(
+            String token,
+            long presentationId,
+            String email,
+            boolean canEdit
+    ) throws Exception {
+        return mockMvc.perform(post("/api/presentations/" + presentationId + "/members")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"email":"%s","canEdit":%s}
+                        """.formatted(email, canEdit)));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions removePresentationMember(
+            String token,
+            long presentationId,
+            String email
+    ) throws Exception {
+        return mockMvc.perform(delete("/api/presentations/" + presentationId + "/members")
+                .param("email", email)
+                .header("Authorization", "Bearer " + token));
+    }
+
     private String registerAndToken(String prefix) throws Exception {
+        return registerUser(prefix).token();
+    }
+
+    private RegisteredUser registerUser(String prefix) throws Exception {
         String suffix = UUID.randomUUID().toString();
+        String email = "%s-%s@example.test".formatted(prefix, suffix);
         String response = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -350,6 +495,13 @@ class PresentationIntegrationTests {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return objectMapper.readTree(response).at("/data/accessToken").asText();
+        return new RegisteredUser(email, objectMapper.readTree(response).at("/data/accessToken").asText());
+    }
+
+    private Long userId(String email) {
+        return userRepository.findByEmail(email).orElseThrow().getId();
+    }
+
+    private record RegisteredUser(String email, String token) {
     }
 }

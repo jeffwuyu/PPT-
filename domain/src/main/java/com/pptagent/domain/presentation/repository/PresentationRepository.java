@@ -12,6 +12,7 @@ public interface PresentationRepository extends BaseMapper<PresentationEntity> {
     default Optional<PresentationEntity> findWithOwnerByIdAndStatus(Long id, PresentationStatus status) {
         return Optional.ofNullable(selectOne(new QueryWrapper<PresentationEntity>()
                 .eq("id", id)
-                .eq("status", status)));
+                .eq("status", status)
+                .eq("is_deleted", "0")));
     }
 }

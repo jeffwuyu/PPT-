@@ -10,7 +10,7 @@ create table presentations (
     current_version_number int not null,
     created_at timestamp not null,
     updated_at timestamp not null,
-    constraint fk_presentations_owner foreign key (owner_user_id) references users (id)
+    is_deleted varchar(1) not null default '0'
 );
 
 create table presentation_slides (
@@ -22,7 +22,7 @@ create table presentation_slides (
     speaker_notes longtext null,
     created_at timestamp not null,
     updated_at timestamp not null,
-    constraint fk_slides_presentation foreign key (presentation_id) references presentations (id)
+    is_deleted varchar(1) not null default '0'
 );
 
 create table slide_elements (
@@ -45,7 +45,7 @@ create table slide_elements (
     style_json longtext not null,
     created_at timestamp not null,
     updated_at timestamp not null,
-    constraint fk_elements_slide foreign key (slide_id) references presentation_slides (id),
+    is_deleted varchar(1) not null default '0',
     unique (slide_id, element_key)
 );
 
@@ -58,8 +58,6 @@ create table presentation_versions (
     snapshot_json longtext not null,
     created_by_user_id bigint not null,
     created_at timestamp not null,
-    constraint fk_versions_presentation foreign key (presentation_id) references presentations (id),
-    constraint fk_versions_created_by foreign key (created_by_user_id) references users (id),
     unique (presentation_id, version_number)
 );
 

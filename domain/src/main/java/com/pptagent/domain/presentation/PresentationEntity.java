@@ -23,6 +23,7 @@ public class PresentationEntity {
     private int currentVersionNumber;
     private Instant createdAt;
     private Instant updatedAt;
+    private String isDeleted;
 
     @TableField(exist = false)
     private UserEntity owner;
@@ -41,6 +42,7 @@ public class PresentationEntity {
         this.currentVersionNumber = 0;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+        this.isDeleted = "0";
     }
 
     public Long getId() {
@@ -87,6 +89,10 @@ public class PresentationEntity {
         return updatedAt;
     }
 
+    public String getIsDeleted() {
+        return isDeleted;
+    }
+
     public void setOwner(UserEntity owner) {
         this.owner = owner;
         this.ownerUserId = owner == null ? null : owner.getId();
@@ -102,6 +108,7 @@ public class PresentationEntity {
 
     public void markDeleted() {
         this.status = PresentationStatus.DELETED;
+        this.isDeleted = "1";
         this.updatedAt = Instant.now();
     }
 

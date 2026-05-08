@@ -20,6 +20,7 @@ public class SlideEntity {
     private String speakerNotes;
     private Instant createdAt;
     private Instant updatedAt;
+    private String isDeleted;
 
     @TableField(exist = false)
     private PresentationEntity presentation;
@@ -36,6 +37,7 @@ public class SlideEntity {
         this.speakerNotes = speakerNotes;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
+        this.isDeleted = "0";
     }
 
     public Long getId() {
@@ -74,6 +76,10 @@ public class SlideEntity {
         return updatedAt;
     }
 
+    public String getIsDeleted() {
+        return isDeleted;
+    }
+
     public void setPresentation(PresentationEntity presentation) {
         this.presentation = presentation;
         this.presentationId = presentation == null ? null : presentation.getId();
@@ -88,6 +94,11 @@ public class SlideEntity {
 
     public void changePageOrder(int pageOrder) {
         this.pageOrder = pageOrder;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markDeleted() {
+        this.isDeleted = "1";
         this.updatedAt = Instant.now();
     }
 }

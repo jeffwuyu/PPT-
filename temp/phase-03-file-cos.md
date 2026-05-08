@@ -1,5 +1,11 @@
 # Phase 03 File COS 验收记录
 
+## 当前更新：外键迁移到服务端
+
+- `V2__file_assets.sql` 已移除 `file_assets.owner_user_id` 的数据库外键。
+- 文件创建、完成上传、读取仍由 `FileService` 先加载并校验 owner 用户；文件归属和访问权限继续在服务端执行。
+- 文件资产本阶段没有删除接口，因此未新增 `is_deleted` 字段。
+
 ## 阶段目标
 
 完成文件与腾讯云 COS 模块，包括上传签名、服务端上传、文件元数据保存、文件类型校验、大小限制、COS Key 规范、上传失败重试和 Mock COS Client。缺少真实 COS API Key 时，通过 Mock COS 验证输入输出、Key 生成、元数据落库和异常处理。

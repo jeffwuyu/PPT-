@@ -4,6 +4,7 @@ import com.pptagent.api.presentation.dto.PresentationRequests;
 import com.pptagent.api.presentation.dto.PresentationResponse;
 import com.pptagent.domain.presentation.PresentationEntity;
 import com.pptagent.domain.presentation.SlideEntity;
+import com.pptagent.domain.presentation.repository.SlideElementRepository;
 import com.pptagent.domain.presentation.repository.SlideRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ import java.util.List;
 public class SlideService {
 
     private final SlideRepository slideRepository;
+    private final SlideElementRepository slideElementRepository;
     private final PresentationAccessService accessService;
     private final PresentationJsonService jsonService;
     private final PresentationOrderService orderService;
@@ -21,12 +23,14 @@ public class SlideService {
 
     public SlideService(
             SlideRepository slideRepository,
+            SlideElementRepository slideElementRepository,
             PresentationAccessService accessService,
             PresentationJsonService jsonService,
             PresentationOrderService orderService,
             PresentationResponseMapper responseMapper
     ) {
         this.slideRepository = slideRepository;
+        this.slideElementRepository = slideElementRepository;
         this.accessService = accessService;
         this.jsonService = jsonService;
         this.orderService = orderService;
@@ -68,7 +72,12 @@ public class SlideService {
         List<SlideEntity> remaining = slideRepository.findByPresentationIdOrderByPageOrderAsc(presentation.getId()).stream()
                 .filter(item -> !item.getId().equals(slide.getId()))
                 .toList();
-        slideRepository.deleteById(slide.getId());
+        slideElementRepository.findBySlideIdOrderByPageOrderAsc(slide.getId()).forEach(element -> {
+            element.markDeleted();
+            slideElementRepository.updateById(element);
+        });
+        slide.markDeleted();
+        slideRepository.updateById(slide);
         orderService.normalizeSlideOrders(remaining);
         return responseMapper.buildPresentationResponse(presentation, false);
     }

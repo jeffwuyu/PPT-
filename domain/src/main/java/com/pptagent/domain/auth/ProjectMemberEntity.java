@@ -16,6 +16,7 @@ public class ProjectMemberEntity {
     private ProjectRole projectRole;
     private boolean canEdit;
     private Instant createdAt;
+    private String isDeleted;
 
     @TableField(exist = false)
     private UserEntity user;
@@ -30,9 +31,28 @@ public class ProjectMemberEntity {
         this.projectRole = projectRole;
         this.canEdit = canEdit;
         this.createdAt = Instant.now();
+        this.isDeleted = "0";
     }
 
     public boolean canEdit() {
         return canEdit || projectRole == ProjectRole.OWNER || projectRole == ProjectRole.EDITOR;
+    }
+
+    public String getIsDeleted() {
+        return isDeleted;
+    }
+
+    public void changeRole(ProjectRole projectRole, boolean canEdit) {
+        this.projectRole = projectRole;
+        this.canEdit = canEdit;
+    }
+
+    public void restore(ProjectRole projectRole, boolean canEdit) {
+        changeRole(projectRole, canEdit);
+        this.isDeleted = "0";
+    }
+
+    public void markDeleted() {
+        this.isDeleted = "1";
     }
 }

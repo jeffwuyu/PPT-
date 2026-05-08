@@ -1,5 +1,11 @@
 # Phase 02 Auth User Permission 验收记录
 
+## 当前更新：外键与逻辑删除
+
+- `V1__auth_user_permission.sql` 已移除所有数据库外键约束，用户、角色、权限、项目成员等关联关系由服务端在写入前校验。
+- `project_members` 新增 `is_deleted varchar(1) not null default '0'`，成员移除不再物理删除，改为写入 `is_deleted='1'`。
+- 项目成员查询默认过滤 `is_deleted='0'`；再次分享同一用户时复用原唯一记录，并恢复为 `is_deleted='0'`。
+
 ## 阶段目标
 
 完成用户、用户等级、团队、项目成员、角色权限、刷新令牌、额度消耗、审计日志表设计；实现注册、登录、刷新 Token、退出登录、用户等级校验、项目权限判断和 JWT 接口鉴权。

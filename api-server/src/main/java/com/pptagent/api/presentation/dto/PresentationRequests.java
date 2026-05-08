@@ -3,6 +3,7 @@ package com.pptagent.api.presentation.dto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pptagent.domain.presentation.SlideElementType;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -103,6 +104,12 @@ public final class PresentationRequests {
 
     public record CreateVersionRequest(
             @Size(max = 255) String reason
+    ) {
+    }
+
+    public record SharePresentationMemberRequest(
+            @NotBlank @Email String email,
+            @NotNull Boolean canEdit
     ) {
     }
 }

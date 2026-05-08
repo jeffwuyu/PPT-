@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -24,9 +25,14 @@ import java.util.List;
 public class PresentationController {
 
     private final PresentationService presentationService;
+    private final PresentationMemberService presentationMemberService;
 
-    public PresentationController(PresentationService presentationService) {
+    public PresentationController(
+            PresentationService presentationService,
+            PresentationMemberService presentationMemberService
+    ) {
         this.presentationService = presentationService;
+        this.presentationMemberService = presentationMemberService;
     }
 
     @PostMapping("/presentations")
@@ -52,6 +58,26 @@ public class PresentationController {
             @Valid @RequestBody PresentationRequests.UpdatePresentationRequest request
     ) {
         return ApiResponse.ok(presentationService.updatePresentation(user.id(), id, request));
+    }
+
+    @PostMapping("/presentations/{id}/members")
+    public ApiResponse<Void> sharePresentationMember(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id,
+            @Valid @RequestBody PresentationRequests.SharePresentationMemberRequest request
+    ) {
+        presentationMemberService.sharePresentation(user.id(), id, request);
+        return ApiResponse.ok(null);
+    }
+
+    @DeleteMapping("/presentations/{id}/members")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removePresentationMember(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id,
+            @RequestParam String email
+    ) {
+        presentationMemberService.removePresentationMember(user.id(), id, email);
     }
 
     @DeleteMapping("/presentations/{id}")
