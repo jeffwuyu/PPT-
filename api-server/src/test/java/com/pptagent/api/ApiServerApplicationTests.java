@@ -38,6 +38,9 @@ class ApiServerApplicationTests {
         assertThat(cosStorageProperties.bucket()).isEqualTo("test-bucket");
         assertThat(agentProperties.mockLlmEnabled()).isTrue();
         assertThat(agentProperties.maxPlanSlides()).isEqualTo(12);
+        assertThat(agentProperties.effectiveDefaultModel()).isEqualTo("mock-llm");
+        assertThat(agentProperties.effectiveImageModel()).isEqualTo("qwen-image-2.0-pro");
+        assertThat(agentProperties.effectiveQwenBaseUrl()).isEqualTo("https://dashscope.example.test/compatible-mode/v1");
         assertThat(collaborationProperties.websocketEndpoint()).isEqualTo("/ws/presentations");
     }
 

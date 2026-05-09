@@ -55,10 +55,20 @@ ppt:
     snapshot-interval-seconds: 30
     yjs-persistence-enabled: true
   agent:
-    default-model: ${PPT_AGENT_DEFAULT_MODEL:mock-llm}
+    default-model: ${PPT_AGENT_DEFAULT_MODEL:qwen-plus}
     max-plan-slides: 20
+    default-checkpoint-max-iterations: ${PPT_AGENT_CHECKPOINT_MAX_ITERATIONS:5}
+    memory-compression-threshold-chars: ${PPT_AGENT_MEMORY_COMPRESSION_THRESHOLD_CHARS:1600}
+    recent-message-limit: ${PPT_AGENT_RECENT_MESSAGE_LIMIT:12}
     mock-llm-enabled: ${PPT_AGENT_MOCK_LLM_ENABLED:true}
     mcp-tools-enabled: ${PPT_AGENT_MCP_TOOLS_ENABLED:true}
+    mock-bailian-enabled: ${PPT_AGENT_MOCK_BAILIAN_ENABLED:true}
+    bailian-api-key: ${PPT_AGENT_BAILIAN_API_KEY:${DASHSCOPE_API_KEY:}}
+    qwen-base-url: ${PPT_AGENT_QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    image-generation-url: ${PPT_AGENT_BAILIAN_IMAGE_GENERATION_URL:https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}
+    image-model: ${PPT_AGENT_BAILIAN_IMAGE_MODEL:qwen-image-2.0-pro}
+    image-size: ${PPT_AGENT_BAILIAN_IMAGE_SIZE:2688*1536}
+    request-timeout-seconds: ${PPT_AGENT_BAILIAN_REQUEST_TIMEOUT_SECONDS:60}
   jwt:
     issuer: ppt-agent-platform
     secret: ${PPT_JWT_SECRET:change-me-change-me-change-me-change-me}

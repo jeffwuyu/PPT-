@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ActiveProfiles("test")
-@SpringBootTest
+@SpringBootTest(properties = "ppt.jwt.access-token-ttl=3s")
 @AutoConfigureMockMvc
 class AuthIntegrationTests {
 
@@ -138,7 +138,7 @@ class AuthIntegrationTests {
         JsonNode register = performRegister(email, "expired" + suffix.substring(0, 8), "StrongPass123");
         String accessToken = register.at("/data/accessToken").asText();
 
-        Thread.sleep(1600);
+        Thread.sleep(3600);
 
         mockMvc.perform(get("/api/auth/me")
                         .header("Authorization", "Bearer " + accessToken))

@@ -27,8 +27,18 @@ ppt:
   agent:
     default-model: mock-llm
     max-plan-slides: 12
+    default-checkpoint-max-iterations: 3
+    memory-compression-threshold-chars: 220
+    recent-message-limit: 8
     mock-llm-enabled: true
     mcp-tools-enabled: true
+    mock-bailian-enabled: true
+    bailian-api-key:
+    qwen-base-url: https://dashscope.example.test/compatible-mode/v1
+    image-generation-url: https://dashscope.example.test/api/v1/services/aigc/multimodal-generation/generation
+    image-model: qwen-image-2.0-pro
+    image-size: 2688*1536
+    request-timeout-seconds: 2
   jwt:
     issuer: ppt-agent-platform-test
     secret: test-secret-test-secret-test-secret-test-secret
