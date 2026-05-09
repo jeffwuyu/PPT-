@@ -34,6 +34,13 @@ public class AgentAiClient {
                 .content();
     }
 
+    public String translatePlan(String markdown) {
+        return chatClient.prompt()
+                .user("TRANSLATE_PLAN_TO_CHINESE\n" + markdown)
+                .call()
+                .content();
+    }
+
     public String compressMemory(String content) {
         return chatClient.prompt()
                 .user("COMPRESS_MEMORY\n" + content)

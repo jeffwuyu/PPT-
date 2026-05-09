@@ -37,8 +37,20 @@ public class AgentToolCallEntity {
         return id;
     }
 
+    public Long getJobId() {
+        return jobId;
+    }
+
+    public Long getCheckpointId() {
+        return checkpointId;
+    }
+
     public String getToolName() {
         return toolName;
+    }
+
+    public String getRequestJson() {
+        return requestJson;
     }
 
     public AgentToolCallStatus getStatus() {
@@ -51,6 +63,14 @@ public class AgentToolCallEntity {
 
     public String getErrorMessage() {
         return errorMessage;
+    }
+
+    public long getDurationMs() {
+        return durationMs;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
     public void finish(AgentToolCallStatus status, String responseJson, long durationMs, String errorMessage) {

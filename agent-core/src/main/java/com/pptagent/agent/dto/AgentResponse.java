@@ -15,6 +15,7 @@ public record AgentResponse(
         String prompt,
         String failureReason,
         String planMarkdown,
+        String translatedPlanMarkdown,
         List<CheckpointResponse> checkpoints
 ) {
     public record CheckpointResponse(

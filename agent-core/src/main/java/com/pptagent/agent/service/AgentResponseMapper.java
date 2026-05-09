@@ -28,6 +28,7 @@ public class AgentResponseMapper {
                 job.getPromptText(),
                 job.getFailureReason(),
                 plan == null ? null : plan.getPlanMarkdown(),
+                plan == null ? null : translatedPlanMarkdown(plan),
                 checkpoints.stream().map(this::toCheckpointResponse).toList()
         );
     }
@@ -64,5 +65,11 @@ public class AgentResponseMapper {
                 response,
                 toolCall.getErrorMessage()
         );
+    }
+
+    private String translatedPlanMarkdown(AgentPlanEntity plan) {
+        JsonNode node = jsonService.fromJson(plan.getPlanJson());
+        JsonNode translated = node.path("translatedMarkdown");
+        return translated.isTextual() ? translated.asText() : null;
     }
 }

@@ -15,6 +15,7 @@ public class MockObjectStorageClient implements ObjectStorageClient {
 
     private final CosStorageProperties properties;
     private final Map<String, StoredObject> objects = new ConcurrentHashMap<>();
+    private final Map<String, byte[]> objectBytes = new ConcurrentHashMap<>();
 
     public MockObjectStorageClient(CosStorageProperties properties) {
         this.properties = properties;
@@ -32,7 +33,17 @@ public class MockObjectStorageClient implements ObjectStorageClient {
         }
         StoredObject storedObject = new StoredObject(objectKey, publicUrl(objectKey), sha256(content));
         objects.put(objectKey, storedObject);
+        objectBytes.put(objectKey, content.clone());
         return storedObject;
+    }
+
+    @Override
+    public byte[] getObjectBytes(String objectKey) {
+        byte[] content = objectBytes.get(objectKey);
+        if (content == null) {
+            throw new ObjectStorageException("Mock COS object not found");
+        }
+        return content.clone();
     }
 
     @Override

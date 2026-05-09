@@ -2,6 +2,7 @@ package com.pptagent.api.presentation;
 
 import com.pptagent.api.presentation.dto.PresentationRequests;
 import com.pptagent.api.presentation.dto.PresentationResponse;
+import com.pptagent.api.presentation.dto.PresentationSummaryResponse;
 import com.pptagent.api.security.AuthenticatedUser;
 import com.pptagent.common.api.ApiResponse;
 import jakarta.validation.Valid;
@@ -26,13 +27,16 @@ public class PresentationController {
 
     private final PresentationService presentationService;
     private final PresentationMemberService presentationMemberService;
+    private final PresentationExportService presentationExportService;
 
     public PresentationController(
             PresentationService presentationService,
-            PresentationMemberService presentationMemberService
+            PresentationMemberService presentationMemberService,
+            PresentationExportService presentationExportService
     ) {
         this.presentationService = presentationService;
         this.presentationMemberService = presentationMemberService;
+        this.presentationExportService = presentationExportService;
     }
 
     @PostMapping("/presentations")
@@ -41,6 +45,13 @@ public class PresentationController {
             @Valid @RequestBody PresentationRequests.CreatePresentationRequest request
     ) {
         return ApiResponse.ok(presentationService.createPresentation(user.id(), request));
+    }
+
+    @GetMapping("/presentations")
+    public ApiResponse<List<PresentationSummaryResponse>> listPresentations(
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        return ApiResponse.ok(presentationService.listPresentations(user.id()));
     }
 
     @GetMapping("/presentations/{id}")
@@ -112,6 +123,14 @@ public class PresentationController {
             @PathVariable Long id
     ) {
         return ApiResponse.ok(presentationService.listVersions(user.id(), id));
+    }
+
+    @PostMapping("/presentations/{id}/export")
+    public ApiResponse<com.pptagent.api.presentation.dto.PresentationExportResponse> exportPresentation(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id
+    ) {
+        return ApiResponse.ok(presentationExportService.exportPresentation(user.id(), id));
     }
 
     @GetMapping("/presentations/{id}/versions/{versionNumber}")

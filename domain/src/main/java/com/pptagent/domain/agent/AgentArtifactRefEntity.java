@@ -39,6 +39,10 @@ public class AgentArtifactRefEntity {
         return id;
     }
 
+    public Long getJobId() {
+        return jobId;
+    }
+
     public Long getCheckpointId() {
         return checkpointId;
     }
@@ -53,6 +57,18 @@ public class AgentArtifactRefEntity {
 
     public boolean isActive() {
         return active;
+    }
+
+    public String getActionName() {
+        return actionName;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
     public void deactivate(String actionName) {

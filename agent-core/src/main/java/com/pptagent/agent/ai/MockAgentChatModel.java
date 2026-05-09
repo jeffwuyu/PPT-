@@ -20,6 +20,15 @@ public class MockAgentChatModel implements ChatModel {
         String content;
         if (input.contains("COMPRESS_MEMORY")) {
             content = "Compressed memory: " + abbreviate(input.replace("COMPRESS_MEMORY", ""), 180);
+        } else if (input.contains("TRANSLATE_PLAN_TO_CHINESE")) {
+            content = """
+                    # PPT 制作计划
+
+                    - [ ] 分析素材并明确演示文稿叙事。
+                    - [ ] 创建包含标题、受众和目标的开场页。
+                    - [ ] 制作核心内容页，使用简洁要点和视觉占位。
+                    - [ ] 检查一致性并准备生成的幻灯片 JSON。
+                    """;
         } else if (input.contains("REACT_CHECKPOINT")) {
             content = """
                     {"thought":"Checkpoint is clear and bounded.","action":"CREATE_SLIDE","needsReplan":false,"cancelCurrent":false}

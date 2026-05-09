@@ -6,6 +6,7 @@ import com.qcloud.cos.auth.BasicCOSCredentials;
 import com.qcloud.cos.auth.COSCredentials;
 import com.qcloud.cos.http.HttpMethodName;
 import com.qcloud.cos.model.GeneratePresignedUrlRequest;
+import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.model.PutObjectRequest;
 import com.qcloud.cos.model.PutObjectResult;
@@ -62,6 +63,15 @@ public class TencentCosObjectStorageClient implements ObjectStorageClient {
             return new StoredObject(objectKey, publicUrl(objectKey), result.getETag());
         } catch (RuntimeException exception) {
             throw new ObjectStorageException("Failed to upload object to COS", exception);
+        }
+    }
+
+    @Override
+    public byte[] getObjectBytes(String objectKey) {
+        try (COSObject object = cosClient.getObject(properties.bucket(), objectKey)) {
+            return object.getObjectContent().readAllBytes();
+        } catch (Exception exception) {
+            throw new ObjectStorageException("Failed to read object from COS", exception);
         }
     }
 

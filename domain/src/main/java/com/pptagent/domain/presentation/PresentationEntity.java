@@ -112,6 +112,11 @@ public class PresentationEntity {
         this.updatedAt = Instant.now();
     }
 
+    public void markPublished() {
+        this.status = PresentationStatus.PUBLISHED;
+        this.updatedAt = Instant.now();
+    }
+
     public int nextVersionNumber() {
         this.currentVersionNumber = this.currentVersionNumber + 1;
         this.updatedAt = Instant.now();

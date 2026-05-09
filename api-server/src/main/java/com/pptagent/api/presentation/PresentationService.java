@@ -3,6 +3,7 @@ package com.pptagent.api.presentation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pptagent.api.presentation.dto.PresentationRequests;
 import com.pptagent.api.presentation.dto.PresentationResponse;
+import com.pptagent.api.presentation.dto.PresentationSummaryResponse;
 import com.pptagent.common.error.ErrorCode;
 import com.pptagent.common.error.PlatformException;
 import com.pptagent.domain.auth.ProjectMemberEntity;
@@ -13,10 +14,15 @@ import com.pptagent.domain.presentation.PresentationEntity;
 import com.pptagent.domain.presentation.PresentationVersionEntity;
 import com.pptagent.domain.presentation.repository.PresentationRepository;
 import com.pptagent.domain.presentation.repository.PresentationVersionRepository;
+import com.pptagent.domain.presentation.repository.SlideRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class PresentationService {
@@ -31,6 +37,7 @@ public class PresentationService {
     private final PresentationJsonService jsonService;
     private final PresentationResponseMapper responseMapper;
     private final ObjectMapper objectMapper;
+    private final SlideRepository slideRepository;
 
     public PresentationService(
             PresentationRepository presentationRepository,
@@ -39,7 +46,8 @@ public class PresentationService {
             PresentationAccessService accessService,
             PresentationJsonService jsonService,
             PresentationResponseMapper responseMapper,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            SlideRepository slideRepository
     ) {
         this.presentationRepository = presentationRepository;
         this.presentationVersionRepository = presentationVersionRepository;
@@ -48,6 +56,7 @@ public class PresentationService {
         this.jsonService = jsonService;
         this.responseMapper = responseMapper;
         this.objectMapper = objectMapper;
+        this.slideRepository = slideRepository;
     }
 
     @Transactional
@@ -63,6 +72,31 @@ public class PresentationService {
         presentationRepository.insert(presentation);
         projectMemberRepository.insert(new ProjectMemberEntity(presentation.getId(), owner, ProjectRole.OWNER, true));
         return responseMapper.buildPresentationResponse(presentation, false);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PresentationSummaryResponse> listPresentations(Long userId) {
+        accessService.loadUser(userId);
+        List<ProjectMemberEntity> memberships = projectMemberRepository.findByUserId(userId);
+        Map<Long, Boolean> editableByPresentationId = new LinkedHashMap<>();
+        for (ProjectMemberEntity membership : memberships) {
+            editableByPresentationId.merge(membership.getProjectId(), membership.canEdit(), Boolean::logicalOr);
+        }
+        return presentationRepository.findNotDeletedByIds(editableByPresentationId.keySet()).stream()
+                .sorted(Comparator.comparing(PresentationEntity::getUpdatedAt).reversed())
+                .map(presentation -> new PresentationSummaryResponse(
+                        presentation.getId(),
+                        presentation.getTitle(),
+                        presentation.getPageWidth(),
+                        presentation.getPageHeight(),
+                        presentation.getStatus(),
+                        presentation.getCurrentVersionNumber(),
+                        presentation.getCreatedAt(),
+                        presentation.getUpdatedAt(),
+                        slideRepository.countByPresentationId(presentation.getId()),
+                        editableByPresentationId.getOrDefault(presentation.getId(), false)
+                ))
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)

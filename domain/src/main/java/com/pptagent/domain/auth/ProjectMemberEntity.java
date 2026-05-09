@@ -38,6 +38,18 @@ public class ProjectMemberEntity {
         return canEdit || projectRole == ProjectRole.OWNER || projectRole == ProjectRole.EDITOR;
     }
 
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public ProjectRole getProjectRole() {
+        return projectRole;
+    }
+
     public String getIsDeleted() {
         return isDeleted;
     }

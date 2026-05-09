@@ -63,8 +63,11 @@ public class PresentationAccessService {
     }
 
     public PresentationEntity loadActivePresentation(Long presentationId) {
-        PresentationEntity presentation = presentationRepository.findWithOwnerByIdAndStatus(presentationId, PresentationStatus.ACTIVE)
+        PresentationEntity presentation = presentationRepository.findNotDeletedById(presentationId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Presentation not found"));
+        if (presentation.getStatus() == PresentationStatus.DELETED) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "Presentation not found");
+        }
         userRepository.findWithRolesById(presentation.getOwnerUserId()).ifPresent(presentation::setOwner);
         return presentation;
     }

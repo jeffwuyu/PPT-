@@ -6,6 +6,8 @@ import com.pptagent.agent.ai.AgentAiClient;
 import com.pptagent.agent.config.AgentProperties;
 import com.pptagent.agent.dto.AgentRequests;
 import com.pptagent.agent.dto.AgentResponse;
+import com.pptagent.agent.progress.AgentProgressEvent;
+import com.pptagent.agent.progress.AgentProgressPublisher;
 import com.pptagent.agent.tool.AgentToolResult;
 import com.pptagent.agent.tool.AgentToolService;
 import com.pptagent.common.error.ErrorCode;
@@ -43,8 +45,10 @@ import com.pptagent.domain.presentation.repository.SlideRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class AgentJobService {
@@ -66,9 +70,11 @@ public class AgentJobService {
     private final AgentToolService toolService;
     private final AgentPlanParser planParser;
     private final AgentSlideJsonExecutionService slideJsonExecutionService;
+    private final AgentTextExtractionService textExtractionService;
     private final AgentResponseMapper responseMapper;
     private final AgentJsonService jsonService;
     private final AgentProperties agentProperties;
+    private final AgentProgressPublisher progressPublisher;
 
     public AgentJobService(
             AgentJobRepository jobRepository,
@@ -88,9 +94,11 @@ public class AgentJobService {
             AgentToolService toolService,
             AgentPlanParser planParser,
             AgentSlideJsonExecutionService slideJsonExecutionService,
+            AgentTextExtractionService textExtractionService,
             AgentResponseMapper responseMapper,
             AgentJsonService jsonService,
-            AgentProperties agentProperties
+            AgentProperties agentProperties,
+            AgentProgressPublisher progressPublisher
     ) {
         this.jobRepository = jobRepository;
         this.sourceRepository = sourceRepository;
@@ -109,9 +117,11 @@ public class AgentJobService {
         this.toolService = toolService;
         this.planParser = planParser;
         this.slideJsonExecutionService = slideJsonExecutionService;
+        this.textExtractionService = textExtractionService;
         this.responseMapper = responseMapper;
         this.jsonService = jsonService;
         this.agentProperties = agentProperties;
+        this.progressPublisher = progressPublisher;
     }
 
     @Transactional
@@ -127,6 +137,11 @@ public class AgentJobService {
         insertFileSources(userId, job.getId(), request.fileAssetIds(), AgentSourceType.FILE);
         insertFileSources(userId, job.getId(), request.imageAssetIds(), AgentSourceType.IMAGE);
         memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "USER_PROMPT", prompt);
+        for (AgentSourceEntity source : sourceRepository.findByJobId(job.getId())) {
+            if (source.getSourceType() == AgentSourceType.FILE && source.getContentText() != null && !source.getContentText().isBlank()) {
+                memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.LONG_TERM, "SOURCE_DOCUMENT", abbreviate(source.getContentText(), 3000));
+            }
+        }
         return buildResponse(job);
     }
 
@@ -138,9 +153,11 @@ public class AgentJobService {
 
         String memory = memoryService.buildMemoryContext(job.getId());
         String markdown = aiClient.generatePlan(buildPlanningPrompt(job), memory);
-        AgentPlanEntity plan = new AgentPlanEntity(job.getId(), markdown, planJson(markdown), nextPlanVersion(job.getId()));
+        String translatedMarkdown = aiClient.translatePlan(markdown);
+        AgentPlanEntity plan = new AgentPlanEntity(job.getId(), markdown, planJson(markdown, translatedMarkdown), nextPlanVersion(job.getId()));
         planRepository.insert(plan);
         messageRepository.insert(new AgentMessageEntity(job.getId(), null, "ASSISTANT", markdown, jsonService.emptyObject()));
+        messageRepository.insert(new AgentMessageEntity(job.getId(), null, "ASSISTANT_TRANSLATION", translatedMarkdown, jsonService.emptyObject()));
         memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.LONG_TERM, "PLAN_SUMMARY", firstLine(markdown));
 
         job.changeStatus(AgentJobStatus.PLANNED);
@@ -180,6 +197,7 @@ public class AgentJobService {
         }
         job.changeStatus(AgentJobStatus.EXECUTING);
         jobRepository.updateById(job);
+        publishJobEvent("checkpoint", job, null, "Agent execution started");
 
         for (AgentCheckpointEntity checkpoint : checkpointRepository.findByJobIdOrderByCheckpointOrder(job.getId())) {
             if (checkpoint.getStatus() == AgentCheckpointStatus.COMPLETED || checkpoint.getStatus() == AgentCheckpointStatus.CANCELLED) {
@@ -189,11 +207,13 @@ public class AgentJobService {
             if (checkpoint.getStatus() == AgentCheckpointStatus.FAILED) {
                 job.fail(checkpoint.getFailureReason());
                 jobRepository.updateById(job);
+                publishJobEvent("error", job, checkpoint, checkpoint.getFailureReason());
                 return buildResponse(job);
             }
         }
         job.changeStatus(AgentJobStatus.GENERATED);
         jobRepository.updateById(job);
+        publishJobEvent("done", job, null, "Agent execution completed");
         return buildResponse(job);
     }
 
@@ -221,6 +241,26 @@ public class AgentJobService {
     }
 
     @Transactional(readOnly = true)
+    public Long requirePublishableJob(Long userId, Long jobId) {
+        AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (job.getStatus() != AgentJobStatus.GENERATED) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Agent job must be generated before publishing");
+        }
+        return job.getPresentationId();
+    }
+
+    @Transactional
+    public AgentResponse markPublished(Long userId, Long jobId) {
+        AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (job.getStatus() != AgentJobStatus.GENERATED && job.getStatus() != AgentJobStatus.PUBLISHED) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Agent job must be generated before publishing");
+        }
+        job.changeStatus(AgentJobStatus.PUBLISHED);
+        jobRepository.updateById(job);
+        return buildResponse(job);
+    }
+
+    @Transactional(readOnly = true)
     public List<AgentResponse.MemoryResponse> getMemory(Long userId, Long jobId) {
         AgentJobEntity job = loadReadableJob(userId, jobId);
         return memoryService.list(job.getId()).stream().map(responseMapper::toMemoryResponse).toList();
@@ -242,39 +282,50 @@ public class AgentJobService {
         while (checkpoint.getCurrentIterations() < checkpoint.getMaxIterations()) {
             checkpoint.startNextIteration();
             checkpointRepository.updateById(checkpoint);
+            publishJobEvent("checkpoint", job, checkpoint, "Checkpoint iteration started");
 
             String react = aiClient.reactCheckpoint(checkpoint.getObjective(), memoryService.buildMemoryContext(job.getId()), forceReplan);
-            messageRepository.insert(new AgentMessageEntity(job.getId(), checkpoint.getId(), "ASSISTANT", react, jsonService.emptyObject()));
+            AgentMessageEntity reactMessage = new AgentMessageEntity(job.getId(), checkpoint.getId(), "ASSISTANT", react, jsonService.emptyObject());
+            messageRepository.insert(reactMessage);
+            publishMessageEvent(job, checkpoint, reactMessage);
 
             if (forceReplan) {
                 Long slideId = slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), "Cancelled checkpoint draft");
+                publishArtifactEvent(job, checkpoint, "SLIDE", slideId, "CREATE");
                 revisePlanForCancelledCheckpoint(job, checkpoint, "React validation cancelled checkpoint " + checkpoint.getCheckpointOrder());
                 rollbackArtifacts(checkpoint.getId());
                 checkpoint.cancel("Cancelled by React replanning");
                 checkpointRepository.updateById(checkpoint);
                 memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "REPLAN", "Cancelled checkpoint and rolled back slide " + slideId);
+                publishJobEvent("checkpoint", job, checkpoint, "Checkpoint cancelled after React replanning");
                 return;
             }
 
             try {
-                toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
-                slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), checkpoint.getTitle());
+                AgentToolResult toolResult = toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
+                publishToolEvent(job, checkpoint, toolResult);
+                Long slideId = slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), checkpoint.getTitle());
+                publishArtifactEvent(job, checkpoint, "SLIDE", slideId, "CREATE");
                 checkpoint.complete();
                 checkpointRepository.updateById(checkpoint);
                 memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "CHECKPOINT", "Completed " + checkpoint.getTitle());
+                publishJobEvent("checkpoint", job, checkpoint, "Checkpoint completed");
                 return;
             } catch (AgentSlideJsonExecutionService.SlideValidationException exception) {
                 memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "SLIDE_VALIDATION_RETRY", exception.getMessage());
                 if (checkpoint.getCurrentIterations() >= checkpoint.getMaxIterations()) {
                     checkpoint.fail(exception.getMessage());
                     checkpointRepository.updateById(checkpoint);
+                    publishJobEvent("checkpoint", job, checkpoint, "Checkpoint failed validation");
                     return;
                 }
+                publishJobEvent("checkpoint", job, checkpoint, "Checkpoint validation retry: " + exception.getMessage());
             }
         }
 
         checkpoint.fail("Checkpoint reached max iteration limit");
         checkpointRepository.updateById(checkpoint);
+        publishJobEvent("checkpoint", job, checkpoint, "Checkpoint reached max iteration limit");
     }
 
     private void rollbackArtifacts(Long checkpointId) {
@@ -304,7 +355,8 @@ public class AgentJobService {
     private void revisePlanForCancelledCheckpoint(AgentJobEntity job, AgentCheckpointEntity checkpoint, String reason) {
         AgentPlanEntity current = latestPlan(job.getId());
         String revisedMarkdown = current.getPlanMarkdown() + "\n\n> Revision: checkpoint %d cancelled because %s.\n".formatted(checkpoint.getCheckpointOrder(), reason);
-        AgentPlanEntity revised = new AgentPlanEntity(job.getId(), revisedMarkdown, planJson(revisedMarkdown), nextPlanVersion(job.getId()));
+        String translatedMarkdown = aiClient.translatePlan(revisedMarkdown);
+        AgentPlanEntity revised = new AgentPlanEntity(job.getId(), revisedMarkdown, planJson(revisedMarkdown, translatedMarkdown), nextPlanVersion(job.getId()));
         planRepository.insert(revised);
         planRevisionRepository.insert(new AgentPlanRevisionEntity(job.getId(), current.getId(), revised.getId(), reason, checkpoint.getId()));
     }
@@ -322,8 +374,11 @@ public class AgentJobService {
                 %s
 
                 Available source count: %d
+
+                Source excerpts:
+                %s
                 Return a Markdown checklist plan only.
-                """.formatted(job.getPromptText(), sourceRepository.findByJobId(job.getId()).size());
+                """.formatted(job.getPromptText(), sourceRepository.findByJobId(job.getId()).size(), sourceExcerpt(job.getId()));
     }
 
     private void insertFileSources(Long userId, Long jobId, List<Long> fileIds, AgentSourceType sourceType) {
@@ -336,10 +391,17 @@ public class AgentJobService {
             if (!asset.getOwnerUserId().equals(userId)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "Agent source file does not belong to current user");
             }
+            String contentText = null;
             if (sourceType == AgentSourceType.IMAGE && asset.getFileType() != FileType.USER_IMAGE && asset.getFileType() != FileType.CRAWLED_IMAGE) {
                 throw new PlatformException(ErrorCode.BAD_REQUEST, "Agent image source must be an image file");
             }
-            sourceRepository.insert(new AgentSourceEntity(jobId, sourceType, fileId, null, jsonService.emptyObject()));
+            if (sourceType == AgentSourceType.FILE) {
+                if (asset.getFileType() != FileType.SOURCE_TEXT) {
+                    throw new PlatformException(ErrorCode.BAD_REQUEST, "Agent source file must be SOURCE_TEXT");
+                }
+                contentText = textExtractionService.extract(asset);
+            }
+            sourceRepository.insert(new AgentSourceEntity(jobId, sourceType, fileId, contentText, jsonService.emptyObject()));
         }
     }
 
@@ -391,11 +453,31 @@ public class AgentJobService {
         return planRepository.findLatestByJobId(jobId).map(plan -> plan.getVersionNumber() + 1).orElse(1);
     }
 
-    private String planJson(String markdown) {
+    private String planJson(String markdown, String translatedMarkdown) {
         ObjectNode node = jsonService.objectNode();
         node.put("format", "markdown");
         node.put("length", markdown == null ? 0 : markdown.length());
+        node.put("translatedMarkdown", translatedMarkdown == null ? "" : translatedMarkdown);
+        node.put("translatedLength", translatedMarkdown == null ? 0 : translatedMarkdown.length());
         return jsonService.toJson(node);
+    }
+
+    private String sourceExcerpt(Long jobId) {
+        StringBuilder builder = new StringBuilder();
+        for (AgentSourceEntity source : sourceRepository.findByJobId(jobId)) {
+            if (source.getSourceType() == AgentSourceType.FILE && source.getContentText() != null && !source.getContentText().isBlank()) {
+                builder.append("- Source file ").append(source.getFileAssetId()).append(":\n");
+                builder.append(abbreviate(source.getContentText(), 3000)).append("\n");
+            }
+        }
+        return builder.isEmpty() ? "No text sources provided." : builder.toString();
+    }
+
+    private String abbreviate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value == null ? "" : value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private AgentResponse buildResponse(AgentJobEntity job) {
@@ -408,6 +490,68 @@ public class AgentJobService {
             return "";
         }
         return value.lines().filter(line -> !line.isBlank()).findFirst().orElse("");
+    }
+
+    private void publishJobEvent(String type, AgentJobEntity job, AgentCheckpointEntity checkpoint, String message) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("jobId", job.getId());
+        data.put("presentationId", job.getPresentationId());
+        data.put("status", job.getStatus());
+        data.put("message", message);
+        if (job.getFailureReason() != null) {
+            data.put("failureReason", job.getFailureReason());
+        }
+        if (checkpoint != null) {
+            data.put("checkpoint", checkpointPayload(checkpoint));
+        }
+        progressPublisher.publish(AgentProgressEvent.of(type, job.getId(), job.getPresentationId(), checkpoint == null ? null : checkpoint.getId(), data));
+    }
+
+    private void publishMessageEvent(AgentJobEntity job, AgentCheckpointEntity checkpoint, AgentMessageEntity message) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("jobId", job.getId());
+        data.put("presentationId", job.getPresentationId());
+        data.put("checkpointId", checkpoint.getId());
+        data.put("messageId", message.getId());
+        data.put("roleName", message.getRoleName());
+        data.put("contentText", message.getContentText());
+        data.put("createdAt", message.getCreatedAt());
+        progressPublisher.publish(AgentProgressEvent.of("llm-message", job.getId(), job.getPresentationId(), checkpoint.getId(), data));
+    }
+
+    private void publishToolEvent(AgentJobEntity job, AgentCheckpointEntity checkpoint, AgentToolResult result) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("jobId", job.getId());
+        data.put("presentationId", job.getPresentationId());
+        data.put("checkpointId", checkpoint.getId());
+        data.put("toolCallId", result.toolCallId());
+        data.put("toolName", result.toolName());
+        data.put("response", result.response());
+        progressPublisher.publish(AgentProgressEvent.of("tool-call", job.getId(), job.getPresentationId(), checkpoint.getId(), data));
+    }
+
+    private void publishArtifactEvent(AgentJobEntity job, AgentCheckpointEntity checkpoint, String artifactType, Long artifactId, String actionName) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("jobId", job.getId());
+        data.put("presentationId", job.getPresentationId());
+        data.put("checkpointId", checkpoint.getId());
+        data.put("artifactType", artifactType);
+        data.put("artifactId", artifactId);
+        data.put("actionName", actionName);
+        progressPublisher.publish(AgentProgressEvent.of("artifact", job.getId(), job.getPresentationId(), checkpoint.getId(), data));
+    }
+
+    private Map<String, Object> checkpointPayload(AgentCheckpointEntity checkpoint) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", checkpoint.getId());
+        data.put("order", checkpoint.getCheckpointOrder());
+        data.put("title", checkpoint.getTitle());
+        data.put("objective", checkpoint.getObjective());
+        data.put("status", checkpoint.getStatus());
+        data.put("currentIterations", checkpoint.getCurrentIterations());
+        data.put("maxIterations", checkpoint.getMaxIterations());
+        data.put("failureReason", checkpoint.getFailureReason());
+        return data;
     }
 
 }

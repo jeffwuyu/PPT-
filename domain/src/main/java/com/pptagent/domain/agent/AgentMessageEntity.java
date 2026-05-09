@@ -33,6 +33,10 @@ public class AgentMessageEntity {
         return id;
     }
 
+    public Long getJobId() {
+        return jobId;
+    }
+
     public Long getCheckpointId() {
         return checkpointId;
     }
@@ -43,5 +47,13 @@ public class AgentMessageEntity {
 
     public String getContentText() {
         return contentText;
+    }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 }

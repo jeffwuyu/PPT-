@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.pptagent.domain.auth.ProjectMemberEntity;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface ProjectMemberRepository extends BaseMapper<ProjectMemberEntity> {
@@ -19,6 +20,13 @@ public interface ProjectMemberRepository extends BaseMapper<ProjectMemberEntity>
         return Optional.ofNullable(selectOne(new QueryWrapper<ProjectMemberEntity>()
                 .eq("project_id", projectId)
                 .eq("user_id", userId)));
+    }
+
+    default List<ProjectMemberEntity> findByUserId(Long userId) {
+        return selectList(new QueryWrapper<ProjectMemberEntity>()
+                .eq("user_id", userId)
+                .eq("is_deleted", "0")
+                .orderByDesc("id"));
     }
 
     default ProjectMemberEntity save(ProjectMemberEntity projectMember) {

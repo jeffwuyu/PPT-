@@ -14,4 +14,10 @@ public interface AgentMessageRepository extends BaseMapper<AgentMessageEntity> {
                 .orderByDesc("id")
                 .last("limit " + Math.max(1, limit)));
     }
+
+    default List<AgentMessageEntity> findByJobIdOrderByIdAsc(Long jobId) {
+        return selectList(new QueryWrapper<AgentMessageEntity>()
+                .eq("job_id", jobId)
+                .orderByAsc("id"));
+    }
 }

@@ -8,5 +8,7 @@ public interface ObjectStorageClient {
 
     StoredObject putObject(String objectKey, String contentType, byte[] content);
 
+    byte[] getObjectBytes(String objectKey);
+
     String publicUrl(String objectKey);
 }

@@ -14,4 +14,10 @@ public interface AgentArtifactRefRepository extends BaseMapper<AgentArtifactRefE
                 .eq("active", true)
                 .orderByAsc("id"));
     }
+
+    default List<AgentArtifactRefEntity> findByJobIdOrderByIdAsc(Long jobId) {
+        return selectList(new QueryWrapper<AgentArtifactRefEntity>()
+                .eq("job_id", jobId)
+                .orderByAsc("id"));
+    }
 }
