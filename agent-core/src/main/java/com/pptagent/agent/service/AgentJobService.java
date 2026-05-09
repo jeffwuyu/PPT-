@@ -228,7 +228,7 @@ public class AgentJobService {
     @Transactional(noRollbackFor = PlatformException.class)
     public AgentResponse.ToolCallResponse callTool(Long userId, Long jobId, AgentRequests.ToolCallRequest request) {
         AgentJobEntity job = loadEditableJob(userId, jobId);
-        AgentToolResult result = toolService.callTool(job.getId(), null, request.toolName(), request.arguments());
+        AgentToolResult result = toolService.callTool(userId, job.getId(), null, request.toolName(), request.arguments());
         memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "TOOL_RESULT", result.response().toString());
         return new AgentResponse.ToolCallResponse(result.toolCallId(), result.toolName(), com.pptagent.domain.agent.AgentToolCallStatus.SUCCESS, result.response(), null);
     }
@@ -258,7 +258,7 @@ public class AgentJobService {
             return;
         }
 
-        toolService.callTool(job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
+        toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
         createSlideArtifact(job, checkpoint, checkpoint.getTitle());
         checkpoint.complete();
         checkpointRepository.updateById(checkpoint);

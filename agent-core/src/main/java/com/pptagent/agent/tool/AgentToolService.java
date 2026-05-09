@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pptagent.agent.image.AgentImageService;
 import com.pptagent.agent.config.AgentProperties;
 import com.pptagent.common.error.ErrorCode;
 import com.pptagent.common.error.PlatformException;
@@ -27,23 +28,26 @@ public class AgentToolService {
     private final ObjectMapper objectMapper;
     private final AgentProperties agentProperties;
     private final BailianImageClient bailianImageClient;
+    private final AgentImageService agentImageService;
 
     public AgentToolService(
             AgentToolCallRepository toolCallRepository,
             AgentToolSchemaValidator schemaValidator,
             ObjectMapper objectMapper,
             AgentProperties agentProperties,
-            BailianImageClient bailianImageClient
+            BailianImageClient bailianImageClient,
+            AgentImageService agentImageService
     ) {
         this.toolCallRepository = toolCallRepository;
         this.schemaValidator = schemaValidator;
         this.objectMapper = objectMapper;
         this.agentProperties = agentProperties;
         this.bailianImageClient = bailianImageClient;
+        this.agentImageService = agentImageService;
     }
 
     @Transactional(noRollbackFor = PlatformException.class)
-    public AgentToolResult callTool(Long jobId, Long checkpointId, String toolName, JsonNode arguments) {
+    public AgentToolResult callTool(Long ownerUserId, Long jobId, Long checkpointId, String toolName, JsonNode arguments) {
         String requestJson = arguments == null ? "{}" : arguments.toString();
         AgentToolCallEntity call = new AgentToolCallEntity(jobId, checkpointId, toolName, requestJson);
         toolCallRepository.insert(call);
@@ -53,6 +57,9 @@ public class AgentToolService {
             JsonNode response = switch (toolName) {
                 case "jsoup_web_fetch" -> fetchWeb(arguments.get("url").asText());
                 case "bailian_image_generate" -> generateImage(arguments);
+                case "image_candidate_search" -> searchImageCandidates(arguments);
+                case "image_vlm_evaluate" -> agentImageService.evaluate(arguments.get("candidate"));
+                case "image_asset_save" -> agentImageService.saveAsset(ownerUserId, arguments.get("image"));
                 default -> throw new PlatformException(ErrorCode.BAD_REQUEST, "Unknown agent tool");
             };
             call.finish(AgentToolCallStatus.SUCCESS, response.toString(), elapsed(start), null);
@@ -70,6 +77,10 @@ public class AgentToolService {
             toolCallRepository.updateById(call);
             throw new PlatformException(ErrorCode.EXTERNAL_SERVICE_ERROR, "Agent tool call failed");
         }
+    }
+
+    public AgentToolResult callTool(Long jobId, Long checkpointId, String toolName, JsonNode arguments) {
+        return callTool(null, jobId, checkpointId, toolName, arguments);
     }
 
     private JsonNode fetchWeb(String url) throws Exception {
@@ -110,6 +121,13 @@ public class AgentToolService {
         response.put("imageUrl", "https://mock-bailian.example.test/generated/%08x.png".formatted(prompt.hashCode()));
         response.put("licenseNote", "Mock image generation result for Phase 06 tests");
         return response;
+    }
+
+    private JsonNode searchImageCandidates(JsonNode arguments) {
+        String topic = arguments.get("topic").asText();
+        String sourceUrl = text(arguments, "sourceUrl");
+        JsonNode limit = arguments.get("limit");
+        return agentImageService.searchCandidates(topic, sourceUrl, limit == null || !limit.canConvertToInt() ? null : limit.asInt());
     }
 
     private String imagePrompt(JsonNode arguments) {

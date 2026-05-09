@@ -8,6 +8,12 @@ import java.util.List;
 public class AgentMcpToolRegistry {
 
     public List<String> toolNames() {
-        return List.of("jsoup_web_fetch", "bailian_image_generate");
+        return List.of(
+                "jsoup_web_fetch",
+                "bailian_image_generate",
+                "image_candidate_search",
+                "image_vlm_evaluate",
+                "image_asset_save"
+        );
     }
 }
