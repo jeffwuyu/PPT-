@@ -59,7 +59,6 @@ create table project_members (
     project_role varchar(40) not null,
     can_edit boolean not null,
     created_at timestamp not null,
-    is_deleted varchar(1) not null default '0',
     unique (project_id, user_id)
 );
 

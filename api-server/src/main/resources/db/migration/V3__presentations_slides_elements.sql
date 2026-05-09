@@ -9,8 +9,7 @@ create table presentations (
     status varchar(30) not null,
     current_version_number int not null,
     created_at timestamp not null,
-    updated_at timestamp not null,
-    is_deleted varchar(1) not null default '0'
+    updated_at timestamp not null
 );
 
 create table presentation_slides (
@@ -21,8 +20,7 @@ create table presentation_slides (
     background_json longtext not null,
     speaker_notes longtext null,
     created_at timestamp not null,
-    updated_at timestamp not null,
-    is_deleted varchar(1) not null default '0'
+    updated_at timestamp not null
 );
 
 create table slide_elements (
@@ -45,7 +43,6 @@ create table slide_elements (
     style_json longtext not null,
     created_at timestamp not null,
     updated_at timestamp not null,
-    is_deleted varchar(1) not null default '0',
     unique (slide_id, element_key)
 );
 

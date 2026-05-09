@@ -36,7 +36,6 @@ import com.pptagent.domain.file.FileType;
 import com.pptagent.domain.file.repository.FileAssetRepository;
 import com.pptagent.domain.presentation.PresentationEntity;
 import com.pptagent.domain.presentation.SlideElementEntity;
-import com.pptagent.domain.presentation.SlideElementType;
 import com.pptagent.domain.presentation.SlideEntity;
 import com.pptagent.domain.presentation.repository.PresentationRepository;
 import com.pptagent.domain.presentation.repository.SlideElementRepository;
@@ -46,7 +45,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 
 @Service
 public class AgentJobService {
@@ -67,6 +65,7 @@ public class AgentJobService {
     private final AgentMemoryService memoryService;
     private final AgentToolService toolService;
     private final AgentPlanParser planParser;
+    private final AgentSlideJsonExecutionService slideJsonExecutionService;
     private final AgentResponseMapper responseMapper;
     private final AgentJsonService jsonService;
     private final AgentProperties agentProperties;
@@ -88,6 +87,7 @@ public class AgentJobService {
             AgentMemoryService memoryService,
             AgentToolService toolService,
             AgentPlanParser planParser,
+            AgentSlideJsonExecutionService slideJsonExecutionService,
             AgentResponseMapper responseMapper,
             AgentJsonService jsonService,
             AgentProperties agentProperties
@@ -108,6 +108,7 @@ public class AgentJobService {
         this.memoryService = memoryService;
         this.toolService = toolService;
         this.planParser = planParser;
+        this.slideJsonExecutionService = slideJsonExecutionService;
         this.responseMapper = responseMapper;
         this.jsonService = jsonService;
         this.agentProperties = agentProperties;
@@ -234,61 +235,46 @@ public class AgentJobService {
     }
 
     private void executeCheckpoint(Long userId, AgentJobEntity job, AgentCheckpointEntity checkpoint) {
-        if (checkpoint.getCurrentIterations() >= checkpoint.getMaxIterations()) {
-            checkpoint.fail("Checkpoint reached max iteration limit");
-            checkpointRepository.updateById(checkpoint);
-            return;
-        }
-        checkpoint.startNextIteration();
-        checkpointRepository.updateById(checkpoint);
-
         boolean forceReplan = checkpoint.getObjective().toLowerCase(Locale.ROOT).contains("replan")
                 || checkpoint.getObjective().contains("重新设计")
                 || job.getPromptText().toLowerCase(Locale.ROOT).contains("force_replan");
-        String react = aiClient.reactCheckpoint(checkpoint.getObjective(), memoryService.buildMemoryContext(job.getId()), forceReplan);
-        messageRepository.insert(new AgentMessageEntity(job.getId(), checkpoint.getId(), "ASSISTANT", react, jsonService.emptyObject()));
 
-        if (forceReplan) {
-            Long slideId = createSlideArtifact(job, checkpoint, "Cancelled checkpoint draft");
-            revisePlanForCancelledCheckpoint(job, checkpoint, "React validation cancelled checkpoint " + checkpoint.getCheckpointOrder());
-            rollbackArtifacts(checkpoint.getId());
-            checkpoint.cancel("Cancelled by React replanning");
+        while (checkpoint.getCurrentIterations() < checkpoint.getMaxIterations()) {
+            checkpoint.startNextIteration();
             checkpointRepository.updateById(checkpoint);
-            memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "REPLAN", "Cancelled checkpoint and rolled back slide " + slideId);
-            return;
+
+            String react = aiClient.reactCheckpoint(checkpoint.getObjective(), memoryService.buildMemoryContext(job.getId()), forceReplan);
+            messageRepository.insert(new AgentMessageEntity(job.getId(), checkpoint.getId(), "ASSISTANT", react, jsonService.emptyObject()));
+
+            if (forceReplan) {
+                Long slideId = slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), "Cancelled checkpoint draft");
+                revisePlanForCancelledCheckpoint(job, checkpoint, "React validation cancelled checkpoint " + checkpoint.getCheckpointOrder());
+                rollbackArtifacts(checkpoint.getId());
+                checkpoint.cancel("Cancelled by React replanning");
+                checkpointRepository.updateById(checkpoint);
+                memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "REPLAN", "Cancelled checkpoint and rolled back slide " + slideId);
+                return;
+            }
+
+            try {
+                toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
+                slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), checkpoint.getTitle());
+                checkpoint.complete();
+                checkpointRepository.updateById(checkpoint);
+                memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "CHECKPOINT", "Completed " + checkpoint.getTitle());
+                return;
+            } catch (AgentSlideJsonExecutionService.SlideValidationException exception) {
+                memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "SLIDE_VALIDATION_RETRY", exception.getMessage());
+                if (checkpoint.getCurrentIterations() >= checkpoint.getMaxIterations()) {
+                    checkpoint.fail(exception.getMessage());
+                    checkpointRepository.updateById(checkpoint);
+                    return;
+                }
+            }
         }
 
-        toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
-        createSlideArtifact(job, checkpoint, checkpoint.getTitle());
-        checkpoint.complete();
+        checkpoint.fail("Checkpoint reached max iteration limit");
         checkpointRepository.updateById(checkpoint);
-        memoryService.append(job.getId(), job.getPresentationId(), userId, AgentMemoryScope.SHORT_TERM, "CHECKPOINT", "Completed " + checkpoint.getTitle());
-    }
-
-    private Long createSlideArtifact(AgentJobEntity job, AgentCheckpointEntity checkpoint, String title) {
-        PresentationEntity presentation = presentationRepository.selectById(job.getPresentationId());
-        int pageOrder = (int) slideRepository.countByPresentationId(job.getPresentationId()) + 1;
-        SlideEntity slide = new SlideEntity(presentation, pageOrder, title, "{}", "Generated by Agent checkpoint " + checkpoint.getCheckpointOrder());
-        slideRepository.insert(slide);
-        SlideElementEntity element = new SlideElementEntity(
-                slide,
-                UUID.randomUUID().toString(),
-                SlideElementType.TEXT,
-                80,
-                80,
-                760,
-                120,
-                0,
-                1,
-                1,
-                true,
-                "{\"text\":\"" + escapeJson(checkpoint.getObjective()) + "\"}",
-                "{\"fontSize\":28,\"color\":\"#1f2937\"}"
-        );
-        slideElementRepository.insert(element);
-        artifactRefRepository.insert(new AgentArtifactRefEntity(job.getId(), checkpoint.getId(), AgentArtifactType.SLIDE, slide.getId(), "CREATE", jsonService.emptyObject()));
-        artifactRefRepository.insert(new AgentArtifactRefEntity(job.getId(), checkpoint.getId(), AgentArtifactType.ELEMENT, element.getId(), "CREATE", jsonService.emptyObject()));
-        return slide.getId();
     }
 
     private void rollbackArtifacts(Long checkpointId) {
@@ -424,7 +410,4 @@ public class AgentJobService {
         return value.lines().filter(line -> !line.isBlank()).findFirst().orElse("");
     }
 
-    private String escapeJson(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
 }

@@ -83,12 +83,87 @@ class AgentIntegrationTests {
 
         JsonNode preview = readPreview(token, presentationId);
         assertThat(preview.at("/data/slides").size()).isEqualTo(4);
+        assertThat(preview.at("/data/slides/0/elements").size()).isEqualTo(3);
+        assertThat(preview.at("/data/slides/0/elements/0/elementKey").asText()).isEqualTo("agent-%d-cp-1-title".formatted(jobId));
+        assertThat(preview.at("/data/slides/0/elements/0/type").asText()).isEqualTo("TEXT");
+        assertThat(preview.at("/data/slides/0/elements/0/content/text").asText()).contains("Analyze source material");
+        assertThat(preview.at("/data/slides/0/elements/1/elementKey").asText()).isEqualTo("agent-%d-cp-1-body".formatted(jobId));
+        assertThat(preview.at("/data/slides/0/elements/2/elementKey").asText()).isEqualTo("agent-%d-cp-1-image".formatted(jobId));
+        assertThat(preview.at("/data/slides/0/elements/2/type").asText()).isEqualTo("IMAGE");
+        assertThat(preview.at("/data/slides/0/elements/2/content/placeholder").asBoolean()).isTrue();
+        assertThat(preview.at("/data/slides/0/elements/2/content/fallbackReason").asText()).contains("No available");
+        assertThat(preview.at("/data/slides/0/elements/2/x").asDouble()).isEqualTo(768.0d);
+        assertThat(preview.at("/data/slides/0/elements/2/width").asDouble()).isEqualTo(410.0d);
+        assertThat(preview.at("/data/slides/0/elements/0/style/themeAccent").asText()).isEqualTo("#2563eb");
         assertThat(toolCallRepository.findByJobId(jobId)).allMatch(call -> call.getStatus() == AgentToolCallStatus.SUCCESS);
 
         mockMvc.perform(get("/api/agent/jobs/" + jobId + "/memory")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    void agentExecutionUsesAvailableImageSourcesInSlideJson() throws Exception {
+        String token = registerAndToken("agent-image-source");
+        long presentationId = createPresentation(token, "Image Source Deck").at("/data/id").asLong();
+        long imageFileId = createAvailableImageFile(token);
+        long jobId = createJob(token, presentationId, "Create a deck using the supplied image", imageFileId).at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/approve-plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/execute").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("GENERATED"));
+
+        JsonNode preview = readPreview(token, presentationId);
+        JsonNode imageElement = preview.at("/data/slides/0/elements/2");
+        assertThat(imageElement.at("/content/placeholder").asBoolean()).isFalse();
+        assertThat(imageElement.at("/content/fileAssetId").asLong()).isEqualTo(imageFileId);
+        assertThat(imageElement.at("/content/publicUrl").asText()).contains("https://cos.example.test/");
+    }
+
+    @Test
+    void slideValidationRetriesBeforeCompletingCheckpoint() throws Exception {
+        String token = registerAndToken("agent-retry");
+        long presentationId = createPresentation(token, "Retry Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "retry_slide_validation_once: create a deck").at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/approve-plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/execute").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("GENERATED"))
+                .andExpect(jsonPath("$.data.checkpoints[0].status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.checkpoints[0].currentIterations").value(2));
+
+        JsonNode preview = readPreview(token, presentationId);
+        assertThat(preview.at("/data/slides").size()).isEqualTo(4);
+    }
+
+    @Test
+    void slideValidationFailureStopsAtMaxIterationsAndFailsJob() throws Exception {
+        String token = registerAndToken("agent-validation-fail");
+        long presentationId = createPresentation(token, "Validation Fail Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "force_slide_validation_failure: create a deck").at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/approve-plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/execute").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.failureReason").value("Forced slide validation failure"))
+                .andExpect(jsonPath("$.data.checkpoints[0].status").value("FAILED"))
+                .andExpect(jsonPath("$.data.checkpoints[0].currentIterations").value(3));
+
+        JsonNode preview = readPreview(token, presentationId);
+        assertThat(preview.at("/data/slides").size()).isEqualTo(0);
     }
 
     @Test
@@ -154,12 +229,17 @@ class AgentIntegrationTests {
     }
 
     private JsonNode createJob(String token, long presentationId, String prompt) throws Exception {
+        return createJob(token, presentationId, prompt, null);
+    }
+
+    private JsonNode createJob(String token, long presentationId, String prompt, Long imageAssetId) throws Exception {
+        String imageAssetIds = imageAssetId == null ? "" : ",\"imageAssetIds\":[%d]".formatted(imageAssetId);
         return objectMapper.readTree(mockMvc.perform(post("/api/agent/jobs")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"presentationId":%d,"prompt":"%s"}
-                                """.formatted(presentationId, prompt.replace("\"", "\\\""))))
+                                {"presentationId":%d,"prompt":"%s"%s}
+                                """.formatted(presentationId, prompt.replace("\"", "\\\""), imageAssetIds)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -186,6 +266,33 @@ class AgentIntegrationTests {
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
+    }
+
+    private long createAvailableImageFile(String token) throws Exception {
+        JsonNode tokenResponse = objectMapper.readTree(mockMvc.perform(post("/api/files/upload-token")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "fileType":"USER_IMAGE",
+                                  "originalFilename":"agent-figure.png",
+                                  "contentType":"image/png",
+                                  "byteSize":128
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+        long fileId = tokenResponse.at("/data/fileId").asLong();
+        mockMvc.perform(post("/api/files/complete")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"fileId":%d}
+                                """.formatted(fileId)))
+                .andExpect(status().isOk());
+        return fileId;
     }
 
     private String registerAndToken(String prefix) throws Exception {
