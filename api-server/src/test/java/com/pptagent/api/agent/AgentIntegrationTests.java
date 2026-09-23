@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pptagent.domain.agent.AgentArtifactType;
 import com.pptagent.domain.agent.AgentMemoryScope;
 import com.pptagent.domain.agent.AgentToolCallStatus;
+import com.pptagent.agent.progress.AgentProgressEvent;
 import com.pptagent.domain.agent.repository.AgentArtifactRefRepository;
 import com.pptagent.domain.agent.repository.AgentMemoryRepository;
 import com.pptagent.domain.agent.repository.AgentToolCallRepository;
@@ -48,6 +49,9 @@ class AgentIntegrationTests {
 
     @Autowired
     private SlideRepository slideRepository;
+
+    @Autowired
+    private AgentProgressStreamService progressStreamService;
 
     @Test
     void agentPlansApprovesCheckpointsExecutesAndPersistsMemory() throws Exception {
@@ -307,6 +311,20 @@ class AgentIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.agentJobId").value(jobId))
                 .andExpect(jsonPath("$.data.totalPages").value(2));
+    }
+
+    @Test
+    void progressEventsReplayFromPersistentCursor() throws Exception {
+        String token = registerAndToken("agent-event-replay");
+        long presentationId = createPresentation(token, "Event Replay Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "Create a deck").at("/data/id").asLong();
+        progressStreamService.publish(AgentProgressEvent.of("checkpoint", jobId, presentationId, null,
+                java.util.Map.of("message", "persisted")));
+
+        var replayed = progressStreamService.replayAfter(jobId, "0");
+        assertThat(replayed).hasSize(1);
+        assertThat(replayed.get(0).eventId()).isEqualTo(replayed.get(0).sequence() + "");
+        assertThat(replayed.get(0).data()).containsEntry("message", "persisted");
     }
 
     private JsonNode createJob(String token, long presentationId, String prompt) throws Exception {

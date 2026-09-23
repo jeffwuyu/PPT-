@@ -2,22 +2,28 @@ package com.pptagent.api.agent;
 
 import com.pptagent.agent.progress.AgentProgressEvent;
 import com.pptagent.agent.progress.AgentProgressPublisher;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.Deque;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Primary
 @Component
@@ -26,8 +32,13 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
     private static final long TIMEOUT_MS = 30 * 60 * 1000L;
 
     private final Map<Long, Set<SseEmitter>> emittersByJobId = new ConcurrentHashMap<>();
-    private final Map<Long, AtomicLong> sequenceByJobId = new ConcurrentHashMap<>();
-    private final Map<Long, Deque<AgentProgressEvent>> historyByJobId = new ConcurrentHashMap<>();
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
+
+    public AgentProgressStreamService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     public SseEmitter subscribe(Long jobId) {
         SseEmitter emitter = new SseEmitter(TIMEOUT_MS);
@@ -40,17 +51,15 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
 
     public List<AgentProgressEvent> replayAfter(Long jobId, String lastEventId) {
         if (lastEventId == null || lastEventId.isBlank()) return List.of();
-        Deque<AgentProgressEvent> history = historyByJobId.get(jobId);
-        if (history == null) return List.of();
-        synchronized (history) {
-            boolean found = false;
-            List<AgentProgressEvent> result = new ArrayList<>();
-            for (AgentProgressEvent event : history) {
-                if (found) result.add(event);
-                if (event.eventId().equals(lastEventId)) found = true;
-            }
-            return found ? result : List.of();
+        long cursor;
+        try {
+            cursor = Long.parseLong(lastEventId);
+        } catch (NumberFormatException exception) {
+            return List.of();
         }
+        return jdbcTemplate.query("select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
+                        + "from agent_progress_events where job_id = ? and id > ? order by id limit 500",
+                (rs, rowNum) -> mapEvent(rs), jobId, cursor);
     }
 
     public void sendReplay(SseEmitter emitter, AgentProgressEvent event) {
@@ -81,14 +90,44 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
     }
 
     @Override
+    @Transactional
     public void publish(AgentProgressEvent event) {
-        long sequence = sequenceByJobId.computeIfAbsent(event.jobId(), ignored -> new AtomicLong()).incrementAndGet();
-        AgentProgressEvent sequenced = new AgentProgressEvent(event.eventId(), sequence, event.type(), event.jobId(), event.presentationId(), event.checkpointId(), event.data(), event.timestamp());
-        Deque<AgentProgressEvent> history = historyByJobId.computeIfAbsent(event.jobId(), ignored -> new ArrayDeque<>());
-        synchronized (history) {
-            history.addLast(sequenced);
-            while (history.size() > 500) history.removeFirst();
+        Long sequence = jdbcTemplate.execute((ConnectionCallback<Long>) connection -> {
+            try (var statement = connection.prepareStatement(
+                    "insert into agent_progress_events (job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at) values (?, ?, ?, ?, ?, ?)",
+                    java.sql.Statement.RETURN_GENERATED_KEYS)) {
+                statement.setLong(1, event.jobId());
+                statement.setLong(2, event.presentationId());
+                if (event.checkpointId() == null) statement.setNull(3, java.sql.Types.BIGINT);
+                else statement.setLong(3, event.checkpointId());
+                statement.setString(4, event.type());
+                statement.setString(5, objectMapper.writeValueAsString(event.data()));
+                statement.setTimestamp(6, Timestamp.from(event.timestamp()));
+                statement.executeUpdate();
+                try (var keys = statement.getGeneratedKeys()) {
+                    return keys.next() ? keys.getLong(1) : null;
+                }
+            } catch (Exception exception) {
+                throw new IllegalStateException("Could not persist agent progress event", exception);
+            }
+        });
+        if (sequence == null) throw new IllegalStateException("Database did not return an event cursor");
+        AgentProgressEvent sequenced = new AgentProgressEvent(String.valueOf(sequence), sequence, event.type(),
+                event.jobId(), event.presentationId(), event.checkpointId(), event.data(), event.timestamp());
+        Runnable dispatch = () -> dispatch(sequenced);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    dispatch.run();
+                }
+            });
+        } else {
+            dispatch.run();
         }
+    }
+
+    private void dispatch(AgentProgressEvent sequenced) {
         Set<SseEmitter> emitters = emittersByJobId.get(sequenced.jobId());
         if (emitters == null || emitters.isEmpty()) {
             return;
@@ -115,6 +154,20 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
                 emitter.completeWithError(exception);
                 remove(sequenced.jobId(), emitter);
             }
+        }
+    }
+
+    private AgentProgressEvent mapEvent(ResultSet rs) throws SQLException {
+        long id = rs.getLong("id");
+        long checkpoint = rs.getLong("checkpoint_id");
+        Long checkpointId = rs.wasNull() ? null : checkpoint;
+        try {
+            Map<String, Object> data = objectMapper.readValue(rs.getString("event_data"), new TypeReference<>() { });
+            return new AgentProgressEvent(String.valueOf(id), id, rs.getString("event_type"),
+                    rs.getLong("job_id"), rs.getLong("presentation_id"), checkpointId, data,
+                    rs.getTimestamp("occurred_at").toInstant());
+        } catch (IOException exception) {
+            throw new SQLException("Stored agent progress event is invalid", exception);
         }
     }
 
