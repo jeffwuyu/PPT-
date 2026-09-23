@@ -1,6 +1,8 @@
 package com.pptagent.agent.service;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.pptagent.agent.ai.AgentAiClient;
 import com.pptagent.domain.agent.AgentArtifactRefEntity;
 import com.pptagent.domain.agent.AgentArtifactType;
 import com.pptagent.domain.agent.AgentCheckpointEntity;
@@ -41,6 +43,7 @@ public class AgentSlideJsonExecutionService {
     private final SlideElementRepository slideElementRepository;
     private final AgentArtifactRefRepository artifactRefRepository;
     private final AgentJsonService jsonService;
+    private final AgentAiClient aiClient;
 
     public AgentSlideJsonExecutionService(
             AgentSourceRepository sourceRepository,
@@ -49,7 +52,8 @@ public class AgentSlideJsonExecutionService {
             SlideRepository slideRepository,
             SlideElementRepository slideElementRepository,
             AgentArtifactRefRepository artifactRefRepository,
-            AgentJsonService jsonService
+            AgentJsonService jsonService,
+            AgentAiClient aiClient
     ) {
         this.sourceRepository = sourceRepository;
         this.fileAssetRepository = fileAssetRepository;
@@ -58,14 +62,25 @@ public class AgentSlideJsonExecutionService {
         this.slideElementRepository = slideElementRepository;
         this.artifactRefRepository = artifactRefRepository;
         this.jsonService = jsonService;
+        this.aiClient = aiClient;
     }
 
     public Long createSlideArtifact(AgentJobEntity job, AgentCheckpointEntity checkpoint, int iteration, String titleOverride) {
+        ObjectNode page = jsonService.objectNode();
+        page.put("title", titleOverride == null ? checkpoint.getTitle() : titleOverride);
+        page.put("objective", checkpoint.getObjective());
+        page.putArray("keyPoints").add(checkpoint.getObjective());
+        page.putArray("sourceBlockIds");
+        return createSlideArtifact(job, checkpoint, iteration, titleOverride, page);
+    }
+
+    public Long createSlideArtifact(AgentJobEntity job, AgentCheckpointEntity checkpoint, int iteration,
+                                    String titleOverride, JsonNode approvedPage) {
         PresentationEntity presentation = presentationRepository.selectById(job.getPresentationId());
         if (presentation == null) {
             throw new SlideValidationException("Presentation not found while generating slide JSON");
         }
-        DraftSlide draft = buildDraft(job, checkpoint, presentation, iteration, titleOverride);
+        DraftSlide draft = buildDraft(job, checkpoint, presentation, iteration, titleOverride, approvedPage);
         validate(draft, presentation, job, checkpoint, iteration);
 
         int pageOrder = (int) slideRepository.countByPresentationId(job.getPresentationId()) + 1;
@@ -107,12 +122,31 @@ public class AgentSlideJsonExecutionService {
             AgentCheckpointEntity checkpoint,
             PresentationEntity presentation,
             int iteration,
-            String titleOverride
+            String titleOverride,
+            JsonNode approvedPage
     ) {
         int width = presentation.getPageWidth();
         int height = presentation.getPageHeight();
-        String title = normalizeTitle(titleOverride == null ? checkpoint.getTitle() : titleOverride);
-        String body = normalizeBody(checkpoint.getObjective());
+        String title = normalizeTitle(firstNonBlank(approvedPage.path("title").asText(null), titleOverride, checkpoint.getTitle()));
+        List<String> keyPoints = readKeyPoints(approvedPage);
+        List<SourceBlock> sources = readApprovedSources(job.getId(), approvedPage.path("sourceBlockIds"));
+        String input = jsonService.toJson(java.util.Map.of(
+                "page", approvedPage,
+                "sources", sources.stream().map(source -> java.util.Map.of(
+                        "blockId", source.blockId(), "text", source.text(), "locator", source.locator())).toList()
+        ));
+        JsonNode generated = jsonService.fromJson(aiClient.generatePageContent(input));
+        String body = generated.path("body").asText("").strip();
+        List<String> covered = readTextArray(generated.path("keyPointsCovered"));
+        List<String> citedSourceIds = readTextArray(generated.path("sourceBlockIds"));
+        if (body.isBlank() || !covered.containsAll(keyPoints) || !containsEveryKeyPoint(body, keyPoints)) {
+            throw new SlideValidationException("Generated page does not cover every approved key point");
+        }
+        java.util.Set<String> allowedSourceIds = sources.stream().map(SourceBlock::blockId).collect(java.util.stream.Collectors.toSet());
+        if (!allowedSourceIds.containsAll(citedSourceIds)) {
+            throw new SlideValidationException("Generated page cites a source block outside the approved outline");
+        }
+        body = normalizeBody(body);
         ImageChoice image = chooseImage(job, checkpoint);
 
         ObjectNode background = jsonService.objectNode();
@@ -274,11 +308,52 @@ public class AgentSlideJsonExecutionService {
     }
 
     private String normalizeBody(String value) {
-        String body = value == null || value.isBlank() ? "Summarize the key message for this slide." : value.strip();
-        body = body.replaceAll("\\s+", " ");
-        String prefix = "Key message: ";
-        String guidance = "\n\n- Keep the claim concise.\n- Support it with one visual.\n- Preserve a consistent narrative.";
-        return abbreviate(prefix + body + guidance, MAX_BODY_LENGTH);
+        return value == null ? "" : value.strip().replaceAll("\\s+", " ");
+    }
+
+    private List<String> readKeyPoints(JsonNode page) {
+        return readTextArray(page.path("keyPoints"));
+    }
+
+    private boolean containsEveryKeyPoint(String body, List<String> keyPoints) {
+        for (String point : keyPoints) if (!body.contains(point)) return false;
+        return true;
+    }
+
+    private List<String> readTextArray(JsonNode values) {
+        if (!values.isArray()) return List.of();
+        List<String> result = new java.util.ArrayList<>();
+        values.forEach(value -> {
+            String text = value.asText("").trim();
+            if (!text.isBlank()) result.add(text);
+        });
+        return result;
+    }
+
+    private List<SourceBlock> readApprovedSources(Long jobId, JsonNode approvedIds) {
+        java.util.Set<String> allowed = new java.util.HashSet<>(readTextArray(approvedIds));
+        if (allowed.isEmpty()) return List.of();
+        List<SourceBlock> result = new java.util.ArrayList<>();
+        for (AgentSourceEntity source : sourceRepository.findByJobId(jobId)) {
+            if (source.getSourceType() != AgentSourceType.FILE) continue;
+            JsonNode blocks = jsonService.fromJson(source.getMetadataJson()).path("blocks");
+            if (!blocks.isArray()) continue;
+            for (JsonNode block : blocks) {
+                String blockId = block.path("blockId").asText("");
+                if (allowed.contains(blockId)) {
+                    result.add(new SourceBlock(blockId, block.path("text").asText(""), block.path("locator")));
+                }
+            }
+        }
+        if (result.size() != allowed.size()) {
+            throw new SlideValidationException("Approved outline references a missing source block");
+        }
+        return result;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value;
+        return "Generated Slide";
     }
 
     private String abbreviate(String value, int maxLength) {
@@ -312,4 +387,6 @@ public class AgentSlideJsonExecutionService {
 
     private record ImageChoice(Long fileAssetId, boolean placeholder, String source, String altText, String reason) {
     }
+
+    private record SourceBlock(String blockId, String text, JsonNode locator) { }
 }

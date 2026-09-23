@@ -48,4 +48,8 @@ public class AgentSourceEntity {
     public String getContentText() {
         return contentText;
     }
+
+    public String getMetadataJson() {
+        return metadataJson;
+    }
 }

@@ -335,7 +335,8 @@ public class AgentJobService {
             try {
                 AgentToolResult toolResult = toolService.callTool(userId, job.getId(), checkpoint.getId(), "bailian_image_generate", imageToolArguments(checkpoint));
                 publishToolEvent(job, checkpoint, toolResult);
-                Long slideId = slideJsonExecutionService.createSlideArtifact(job, checkpoint, checkpoint.getCurrentIterations(), checkpoint.getTitle());
+                Long slideId = slideJsonExecutionService.createSlideArtifact(
+                        job, checkpoint, checkpoint.getCurrentIterations(), checkpoint.getTitle(), approvedPage(job.getId(), checkpoint.getCheckpointOrder()));
                 publishArtifactEvent(job, checkpoint, "SLIDE", slideId, "CREATE");
                 checkpoint.complete();
                 checkpointRepository.updateById(checkpoint);
@@ -397,6 +398,19 @@ public class AgentJobService {
         arguments.put("prompt", "Professional PPT illustration for: " + checkpoint.getObjective());
         arguments.put("style", "flat illustration");
         return arguments;
+    }
+
+    private JsonNode approvedPage(Long jobId, int checkpointOrder) {
+        AgentPlanEntity plan = latestPlan(jobId);
+        if (plan.getApprovedOutlineRevision() == null
+                || plan.getApprovedOutlineRevision() != plan.getOutlineRevision()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Approved outline changed before page generation");
+        }
+        JsonNode pages = jsonService.fromJson(plan.getApprovedOutlineJson()).path("pages");
+        if (!pages.isArray() || checkpointOrder < 1 || checkpointOrder > pages.size()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Checkpoint has no matching approved outline page");
+        }
+        return pages.get(checkpointOrder - 1);
     }
 
     private String buildPlanningPrompt(AgentJobEntity job) {

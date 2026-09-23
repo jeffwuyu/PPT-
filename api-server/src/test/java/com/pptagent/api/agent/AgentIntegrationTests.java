@@ -327,6 +327,33 @@ class AgentIntegrationTests {
         assertThat(replayed.get(0).data()).containsEntry("message", "persisted");
     }
 
+    @Test
+    void generatedPageUsesApprovedKeyPointsAsItsBody() throws Exception {
+        String token = registerAndToken("agent-approved-content");
+        long presentationId = createPresentation(token, "Approved Content Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "Create a deck from the approved outline").at("/data/id").asLong();
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedRevision":1,"approve":true,"outline":{"pages":[
+                                  {"pageId":"content-page-1","order":1,"title":"Verified content",
+                                   "objective":"Explain verified controls","keyPoints":["Use revision checks","Reject stale writes"],"sourceBlockIds":[]}
+                                ]}}
+                                """))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/execute").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("GENERATED"));
+
+        JsonNode preview = readPreview(token, presentationId);
+        String body = preview.at("/data/slides/0/elements/1/content/text").asText();
+        assertThat(body).contains("Use revision checks", "Reject stale writes");
+        assertThat(body).doesNotContain("Support it with one visual");
+    }
+
     private JsonNode createJob(String token, long presentationId, String prompt) throws Exception {
         return createJob(token, presentationId, prompt, null);
     }

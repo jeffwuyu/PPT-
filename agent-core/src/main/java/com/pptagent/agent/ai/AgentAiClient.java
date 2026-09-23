@@ -34,6 +34,15 @@ public class AgentAiClient {
                 .content();
     }
 
+    public String generatePageContent(String pageInputJson) {
+        return chatClient.prompt()
+                .user("PAGE_CONTENT_REQUEST\nReturn only JSON with title, body, keyPointsCovered, and sourceBlockIds. "
+                        + "Use the approved page and supplied source blocks. Cover every key point without inventing facts.\n"
+                        + pageInputJson)
+                .call()
+                .content();
+    }
+
     public String translatePlan(String markdown) {
         return chatClient.prompt()
                 .user("TRANSLATE_PLAN_TO_CHINESE\n" + markdown)
