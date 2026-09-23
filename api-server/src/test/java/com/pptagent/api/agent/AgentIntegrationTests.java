@@ -20,7 +20,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 
+import java.io.ByteArrayOutputStream;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -133,6 +140,32 @@ class AgentIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.failureReason").value("DOCUMENT_CORRUPTED"));
+    }
+
+    @Test
+    void sourceParseSupportsPdfDocxAndTxtBlocks() throws Exception {
+        String token = registerAndToken("source-formats");
+
+        JsonNode pdf = parseUploadedSource(token, "brief.pdf", "application/pdf", pdfBytes(), "pdf");
+        assertThat(pdf.at("/data/status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(pdf.at("/data/blocks").size()).isEqualTo(1);
+        assertThat(pdf.at("/data/blocks/0/type").asText()).isEqualTo("paragraph");
+        assertThat(pdf.at("/data/blocks/0/text").asText()).contains("PDF source");
+        assertThat(pdf.at("/data/blocks/0/locatorJson").asText()).contains("page");
+
+        JsonNode docx = parseUploadedSource(token, "brief.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docxBytes(), "docx");
+        assertThat(docx.at("/data/status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(docx.at("/data/blocks").size()).isEqualTo(2);
+        assertThat(docx.at("/data/blocks/0/type").asText()).isEqualTo("paragraph");
+        assertThat(docx.at("/data/blocks/1/type").asText()).isEqualTo("table");
+        assertThat(docx.at("/data/blocks/1/text").asText()).contains("Q1 | Ready");
+
+        JsonNode txt = parseUploadedSource(token, "brief.txt", "text/plain",
+                "Plain text source\n\nSecond paragraph".getBytes(java.nio.charset.StandardCharsets.UTF_8), "txt");
+        assertThat(txt.at("/data/status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(txt.at("/data/blocks").size()).isEqualTo(2);
+        assertThat(txt.at("/data/blocks/0/text").asText()).contains("Plain text source");
     }
 
     @Test
@@ -522,6 +555,52 @@ class AgentIntegrationTests {
                                 """.formatted(fileId)))
                 .andExpect(status().isOk());
         return fileId;
+    }
+
+    private JsonNode parseUploadedSource(String token, String filename, String contentType, byte[] content,
+                                         String key) throws Exception {
+        JsonNode uploaded = objectMapper.readTree(mockMvc.perform(multipart("/api/files/upload")
+                        .file(new MockMultipartFile("file", filename, contentType, content))
+                        .param("fileType", "SOURCE_TEXT")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        long fileId = uploaded.at("/data/id").asLong();
+        return objectMapper.readTree(mockMvc.perform(post("/api/agent/sources/parse")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileAssetId\":%d,\"idempotencyKey\":\"formats-%s\"}".formatted(fileId, key)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+    }
+
+    private byte[] pdfBytes() throws Exception {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                stream.beginText();
+                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                stream.newLineAtOffset(72, 720);
+                stream.showText("PDF source");
+                stream.endText();
+            }
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private byte[] docxBytes() throws Exception {
+        try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            document.createParagraph().createRun().setText("DOCX source");
+            var table = document.createTable(2, 2);
+            table.getRow(0).getCell(0).setText("Quarter");
+            table.getRow(0).getCell(1).setText("Status");
+            table.getRow(1).getCell(0).setText("Q1");
+            table.getRow(1).getCell(1).setText("Ready");
+            document.write(output);
+            return output.toByteArray();
+        }
     }
 
     private String registerAndToken(String prefix) throws Exception {
