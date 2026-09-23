@@ -392,6 +392,7 @@ public class AgentJobService {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "Agent source file does not belong to current user");
             }
             String contentText = null;
+            String metadataJson = jsonService.emptyObject();
             if (sourceType == AgentSourceType.IMAGE && asset.getFileType() != FileType.USER_IMAGE && asset.getFileType() != FileType.CRAWLED_IMAGE) {
                 throw new PlatformException(ErrorCode.BAD_REQUEST, "Agent image source must be an image file");
             }
@@ -399,9 +400,16 @@ public class AgentJobService {
                 if (asset.getFileType() != FileType.SOURCE_TEXT) {
                     throw new PlatformException(ErrorCode.BAD_REQUEST, "Agent source file must be SOURCE_TEXT");
                 }
-                contentText = textExtractionService.extract(asset);
+                AgentTextExtractionService.ExtractedDocument extracted = textExtractionService.extractStructured(asset);
+                contentText = extracted.blocks().stream().map(AgentTextExtractionService.SourceBlock::text).reduce((a, b) -> a + "\n" + b).orElse("");
+                metadataJson = jsonService.toJson(java.util.Map.of(
+                        "sourceHash", extracted.sourceHash(),
+                        "parserVersion", extracted.parserVersion(),
+                        "blocks", extracted.blocks(),
+                        "warnings", extracted.warnings()
+                ));
             }
-            sourceRepository.insert(new AgentSourceEntity(jobId, sourceType, fileId, contentText, jsonService.emptyObject()));
+            sourceRepository.insert(new AgentSourceEntity(jobId, sourceType, fileId, contentText, metadataJson));
         }
     }
 

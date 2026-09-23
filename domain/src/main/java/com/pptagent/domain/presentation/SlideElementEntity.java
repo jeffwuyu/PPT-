@@ -31,6 +31,10 @@ public class SlideElementEntity {
     private Instant createdAt;
     private Instant updatedAt;
     private String isDeleted;
+    /** Optimistic concurrency version for human and AI edits. */
+    private int revision = 1;
+    /** Persistent human protection flag; AI writes must never clear it. */
+    private boolean locked;
 
     @TableField(exist = false)
     private SlideEntity slide;
@@ -136,6 +140,28 @@ public class SlideElementEntity {
         return isDeleted;
     }
 
+    public int getRevision() {
+        return revision;
+    }
+
+    public boolean isLocked() {
+        return locked;
+    }
+
+    public void setLocked(boolean locked) {
+        this.locked = locked;
+        this.updatedAt = Instant.now();
+    }
+
+    public boolean matchesRevision(int expectedRevision) {
+        return revision == expectedRevision;
+    }
+
+    public void incrementRevision() {
+        this.revision++;
+        this.updatedAt = Instant.now();
+    }
+
     public void setSlide(SlideEntity slide) {
         this.slide = slide;
         this.slideId = slide == null ? null : slide.getId();
@@ -165,6 +191,7 @@ public class SlideElementEntity {
         this.initiallyPresent = initiallyPresent;
         this.contentJson = contentJson;
         this.styleJson = styleJson;
+        this.revision++;
         this.updatedAt = Instant.now();
     }
 
@@ -175,6 +202,7 @@ public class SlideElementEntity {
 
     public void markDeleted() {
         this.isDeleted = "1";
+        this.revision++;
         this.updatedAt = Instant.now();
     }
 }

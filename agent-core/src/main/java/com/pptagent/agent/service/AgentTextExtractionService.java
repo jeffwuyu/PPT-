@@ -10,16 +10,17 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class AgentTextExtractionService {
-
-    private static final int MAX_SOURCE_CHARS = 12000;
 
     private final ObjectStorageClient objectStorageClient;
 
@@ -28,51 +29,125 @@ public class AgentTextExtractionService {
     }
 
     public String extract(FileAssetEntity asset) {
+        return extractStructured(asset).blocks().stream()
+                .map(SourceBlock::text)
+                .filter(value -> value != null && !value.isBlank())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("");
+    }
+
+    /**
+     * Extract the complete source document without the old 12k character truncation.
+     * Blocks retain a lightweight locator so outline generation can cite the source.
+     */
+    public ExtractedDocument extractStructured(FileAssetEntity asset) {
         if (asset.getFileType() != FileType.SOURCE_TEXT) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "Agent source file must be a text document");
         }
         byte[] bytes = objectStorageClient.getObjectBytes(asset.getObjectKey());
         String extension = extension(asset.getOriginalFilename());
         String contentType = asset.getContentType() == null ? "" : asset.getContentType().toLowerCase(Locale.ROOT);
-        String text;
+        List<SourceBlock> blocks;
         if ("docx".equals(extension) || contentType.contains("wordprocessingml")) {
-            text = extractDocx(bytes);
+            blocks = extractDocxBlocks(bytes);
         } else if ("pdf".equals(extension) || contentType.contains("pdf")) {
-            text = extractPdf(bytes);
+            blocks = extractPdfBlocks(bytes);
         } else {
-            text = new String(bytes, StandardCharsets.UTF_8);
+            blocks = extractPlainTextBlocks(new String(bytes, StandardCharsets.UTF_8));
         }
-        return normalize(text);
+        if (blocks.isEmpty()) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "EMPTY_DOCUMENT");
+        }
+        String sourceHash = sha256(bytes);
+        return new ExtractedDocument(sourceHash, "parser-v2", List.copyOf(blocks), List.of());
     }
 
-    private String extractDocx(byte[] bytes) {
+    private List<SourceBlock> extractDocxBlocks(byte[] bytes) {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
-            StringBuilder builder = new StringBuilder();
+            List<SourceBlock> blocks = new ArrayList<>();
+            int paragraphIndex = 0;
             for (XWPFParagraph paragraph : document.getParagraphs()) {
                 if (!paragraph.getText().isBlank()) {
-                    builder.append(paragraph.getText()).append('\n');
+                    blocks.add(new SourceBlock("paragraph-" + paragraphIndex, "paragraph", paragraph.getText().trim(),
+                            java.util.Map.of("paragraphIndex", paragraphIndex)));
                 }
+                paragraphIndex++;
             }
-            return builder.toString();
+            int tableIndex = 0;
+            for (XWPFTable table : document.getTables()) {
+                List<String> rows = table.getRows().stream()
+                        .map(row -> String.join(" | ", row.getTableCells().stream().map(cell -> cell.getText().trim()).toList()))
+                        .filter(row -> !row.isBlank())
+                        .toList();
+                if (!rows.isEmpty()) {
+                    blocks.add(new SourceBlock("table-" + tableIndex, "table", String.join("\n", rows),
+                            java.util.Map.of("tableIndex", tableIndex)));
+                }
+                tableIndex++;
+            }
+            return blocks;
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "Failed to extract Word text");
         }
     }
 
-    private String extractPdf(byte[] bytes) {
+    private List<SourceBlock> extractPdfBlocks(byte[] bytes) {
         try (PDDocument document = Loader.loadPDF(bytes)) {
-            return new PDFTextStripper().getText(document);
+            PDFTextStripper stripper = new PDFTextStripper();
+            List<SourceBlock> blocks = new ArrayList<>();
+            for (int page = 1; page <= document.getNumberOfPages(); page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                String text = stripper.getText(document).trim();
+                if (!text.isBlank()) {
+                    blocks.add(new SourceBlock("page-" + page, "paragraph", text, java.util.Map.of("page", page)));
+                }
+            }
+            if (blocks.isEmpty() && document.getNumberOfPages() > 0) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "OCR_REQUIRED");
+            }
+            return blocks;
+        } catch (PlatformException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "Failed to extract PDF text");
         }
     }
 
-    private String normalize(String text) {
+    private List<SourceBlock> extractPlainTextBlocks(String text) {
         String normalized = text == null ? "" : text.replace("\u0000", "").trim();
-        if (normalized.length() > MAX_SOURCE_CHARS) {
-            return normalized.substring(0, MAX_SOURCE_CHARS);
+        if (normalized.isBlank()) {
+            return List.of();
         }
-        return normalized;
+        List<SourceBlock> blocks = new ArrayList<>();
+        String[] lines = normalized.split("\\R");
+        int start = 1;
+        StringBuilder paragraph = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].isBlank() && !paragraph.isEmpty()) {
+                blocks.add(new SourceBlock("lines-" + start + "-" + i, "paragraph", paragraph.toString().trim(),
+                        java.util.Map.of("lineStart", start, "lineEnd", i)));
+                paragraph.setLength(0);
+                start = i + 2;
+            } else if (!lines[i].isBlank()) {
+                if (!paragraph.isEmpty()) paragraph.append('\n');
+                paragraph.append(lines[i]);
+            }
+        }
+        if (!paragraph.isEmpty()) {
+            blocks.add(new SourceBlock("lines-" + start + "-" + lines.length, "paragraph", paragraph.toString().trim(),
+                    java.util.Map.of("lineStart", start, "lineEnd", lines.length)));
+        }
+        return blocks;
+    }
+
+    private String sha256(byte[] bytes) {
+        try {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(digest.digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
+        }
     }
 
     private String extension(String filename) {
@@ -83,5 +158,11 @@ public class AgentTextExtractionService {
         return index >= 0 && index < filename.length() - 1
                 ? filename.substring(index + 1).toLowerCase(Locale.ROOT)
                 : "";
+    }
+
+    public record ExtractedDocument(String sourceHash, String parserVersion, List<SourceBlock> blocks, List<String> warnings) {
+    }
+
+    public record SourceBlock(String blockId, String type, String text, java.util.Map<String, Object> locator) {
     }
 }
