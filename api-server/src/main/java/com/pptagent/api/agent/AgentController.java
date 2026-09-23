@@ -78,8 +78,12 @@ public class AgentController {
         Object snapshot = progressSnapshotService.snapshot(user.id(), id);
         SseEmitter emitter = progressStreamService.subscribe(id);
         progressStreamService.sendSnapshot(emitter, snapshot);
-        for (var event : progressStreamService.replayAfter(id, lastEventId)) {
-            progressStreamService.sendReplay(emitter, event);
+        try {
+            for (var event : progressStreamService.replayAfter(id, lastEventId)) {
+                progressStreamService.sendReplay(emitter, event);
+            }
+        } catch (CursorExpiredException exception) {
+            progressStreamService.sendCursorExpired(emitter, exception.getMessage());
         }
         return emitter;
     }

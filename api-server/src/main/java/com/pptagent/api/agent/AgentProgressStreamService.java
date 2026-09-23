@@ -55,11 +55,15 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         try {
             cursor = Long.parseLong(lastEventId);
         } catch (NumberFormatException exception) {
-            return List.of();
+            throw new CursorExpiredException("Event cursor is invalid; a fresh snapshot is required");
         }
-        return jdbcTemplate.query("select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
-                        + "from agent_progress_events where job_id = ? and id > ? order by id limit 500",
+        List<AgentProgressEvent> events = jdbcTemplate.query("select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
+                        + "from agent_progress_events where job_id = ? and id > ? order by id limit 501",
                 (rs, rowNum) -> mapEvent(rs), jobId, cursor);
+        if (events.size() > 500) {
+            throw new CursorExpiredException("Event cursor requires a fresh snapshot");
+        }
+        return events;
     }
 
     public void sendReplay(SseEmitter emitter, AgentProgressEvent event) {
@@ -84,6 +88,16 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
             emitter.send(SseEmitter.event()
                     .name("snapshot")
                     .data(snapshot, MediaType.APPLICATION_JSON));
+        } catch (IOException exception) {
+            emitter.completeWithError(exception);
+        }
+    }
+
+    public void sendCursorExpired(SseEmitter emitter, String message) {
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("CURSOR_EXPIRED")
+                    .data(Map.of("code", "CURSOR_EXPIRED", "message", message), MediaType.APPLICATION_JSON));
         } catch (IOException exception) {
             emitter.completeWithError(exception);
         }

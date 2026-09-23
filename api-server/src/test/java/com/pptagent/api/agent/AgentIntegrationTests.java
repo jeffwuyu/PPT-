@@ -23,6 +23,7 @@ import org.springframework.core.task.TaskExecutor;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -354,6 +355,12 @@ class AgentIntegrationTests {
         assertThat(replayed).hasSize(1);
         assertThat(replayed.get(0).eventId()).isEqualTo(replayed.get(0).sequence() + "");
         assertThat(replayed.get(0).data()).containsEntry("message", "persisted");
+    }
+
+    @Test
+    void progressReplayRejectsAnInvalidCursor() {
+        assertThatThrownBy(() -> progressStreamService.replayAfter(999_999L, "not-a-number"))
+                .isInstanceOf(CursorExpiredException.class);
     }
 
     @Test
