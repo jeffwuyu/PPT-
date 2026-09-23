@@ -27,6 +27,7 @@
   "artifacts": ["command.txt", "logs/maven-test.log"],
   "limitations": [
     "This is a per-instance bounded executor; it does not prove a cluster-wide model concurrency limit.",
-    "The test uses mocked providers and does not measure throughput or provider quotas."
+    "The test uses mocked providers and does not measure throughput or provider quotas.",
+    "The stored log is a compact test summary rather than a complete process log."
   ]
 }

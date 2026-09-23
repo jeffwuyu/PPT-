@@ -34,6 +34,7 @@
   ],
   "limitations": [
     "This evidence covers the deterministic async page execution and idempotency case only.",
+    "database-snapshot.json and events.jsonl are assertion summaries emitted for this run, not raw database/export dumps.",
     "Lease takeover, running cancellation, global concurrency and real-provider performance remain unverified."
   ]
 }
