@@ -109,6 +109,33 @@ class AgentIntegrationTests {
     }
 
     @Test
+    void sourceParseReportsCorruptionAndEnforcesFileOwnership() throws Exception {
+        String ownerToken = registerAndToken("source-corrupt-owner");
+        String otherToken = registerAndToken("source-corrupt-other");
+        JsonNode uploaded = objectMapper.readTree(mockMvc.perform(multipart("/api/files/upload")
+                        .file(new MockMultipartFile("file", "broken.pdf", "application/pdf", "not a pdf".getBytes()))
+                        .param("fileType", "SOURCE_TEXT")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        long fileId = uploaded.at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/sources/parse")
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileAssetId\":%d,\"idempotencyKey\":\"other\"}".formatted(fileId)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/agent/sources/parse")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileAssetId\":%d,\"idempotencyKey\":\"broken\"}".formatted(fileId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.failureReason").value("DOCUMENT_CORRUPTED"));
+    }
+
+    @Test
     void agentPlansApprovesCheckpointsExecutesAndPersistsMemory() throws Exception {
         String token = registerAndToken("agent-flow");
         long presentationId = createPresentation(token, "Agent Deck").at("/data/id").asLong();

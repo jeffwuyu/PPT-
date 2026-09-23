@@ -95,7 +95,9 @@ public class SourceParseService {
             }
             parseJob.succeed(document.sourceHash(), document.parserVersion(), document.blocks().size());
         } catch (PlatformException exception) {
-            parseJob.fail(exception.getMessage());
+            String reason = exception.getMessage();
+            parseJob.fail(reason != null && reason.startsWith("Failed to extract")
+                    ? "DOCUMENT_CORRUPTED" : reason);
         } catch (RuntimeException exception) {
             parseJob.fail("DOCUMENT_CORRUPTED");
         }
