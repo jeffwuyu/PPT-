@@ -56,6 +56,9 @@ ppt:
     yjs-persistence-enabled: true
   agent:
     default-model: ${PPT_AGENT_DEFAULT_MODEL:qwen-plus}
+    generation:
+      worker-count: ${PPT_AGENT_GENERATION_WORKER_COUNT:4}
+      queue-capacity: ${PPT_AGENT_GENERATION_QUEUE_CAPACITY:100}
     max-plan-slides: 20
     default-checkpoint-max-iterations: ${PPT_AGENT_CHECKPOINT_MAX_ITERATIONS:5}
     memory-compression-threshold-chars: ${PPT_AGENT_MEMORY_COMPRESSION_THRESHOLD_CHARS:1600}

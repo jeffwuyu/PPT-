@@ -17,6 +17,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 
 import java.util.UUID;
 
@@ -52,6 +54,18 @@ class AgentIntegrationTests {
 
     @Autowired
     private AgentProgressStreamService progressStreamService;
+
+    @Autowired
+    private TaskExecutor taskExecutor;
+
+    @Test
+    void generationExecutorUsesBoundedConfiguredConcurrency() {
+        assertThat(taskExecutor).isInstanceOf(ThreadPoolTaskExecutor.class);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) taskExecutor;
+        assertThat(executor.getCorePoolSize()).isEqualTo(4);
+        assertThat(executor.getMaxPoolSize()).isEqualTo(4);
+        assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isEqualTo(100);
+    }
 
     @Test
     void agentPlansApprovesCheckpointsExecutesAndPersistsMemory() throws Exception {
