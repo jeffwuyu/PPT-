@@ -169,6 +169,19 @@ class AgentIntegrationTests {
     }
 
     @Test
+    void sourceParseDistinguishesOcrRequiredFromEmptyDocument() throws Exception {
+        String token = registerAndToken("source-empty");
+
+        JsonNode imageOnlyPdf = parseUploadedSource(token, "scan.pdf", "application/pdf", blankPdfBytes(), "ocr");
+        assertThat(imageOnlyPdf.at("/data/status").asText()).isEqualTo("FAILED");
+        assertThat(imageOnlyPdf.at("/data/failureReason").asText()).isEqualTo("OCR_REQUIRED");
+
+        JsonNode emptyTxt = parseUploadedSource(token, "empty.txt", "text/plain", " \n ".getBytes(java.nio.charset.StandardCharsets.UTF_8), "empty");
+        assertThat(emptyTxt.at("/data/status").asText()).isEqualTo("FAILED");
+        assertThat(emptyTxt.at("/data/failureReason").asText()).isEqualTo("EMPTY_DOCUMENT");
+    }
+
+    @Test
     void agentPlansApprovesCheckpointsExecutesAndPersistsMemory() throws Exception {
         String token = registerAndToken("agent-flow");
         long presentationId = createPresentation(token, "Agent Deck").at("/data/id").asLong();
@@ -585,6 +598,14 @@ class AgentIntegrationTests {
                 stream.showText("PDF source");
                 stream.endText();
             }
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private byte[] blankPdfBytes() throws Exception {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            document.addPage(new PDPage());
             document.save(output);
             return output.toByteArray();
         }

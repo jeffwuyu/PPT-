@@ -16,11 +16,13 @@
     "docxStatus": "SUCCEEDED",
     "txtStatus": "SUCCEEDED",
     "pdfLocator": "page",
-    "docxBlockTypes": ["paragraph", "table"]
+    "docxBlockTypes": ["paragraph", "table"],
+    "ocrStatus": "OCR_REQUIRED",
+    "emptyStatus": "EMPTY_DOCUMENT"
   },
   "actual": {
     "testClass": "com.pptagent.api.agent.AgentIntegrationTests",
-    "testsRun": 17,
+    "testsRun": 18,
     "failures": 0,
     "errors": 0,
     "status": "SUCCEEDED",
@@ -29,7 +31,9 @@
     "docxBlocks": 2,
     "txtBlocks": 2,
     "pdfLocatorPersisted": true,
-    "docxTablePersisted": true
+    "docxTablePersisted": true,
+    "ocrRequired": true,
+    "emptyDocument": true
   },
   "artifacts": ["command.txt", "logs/maven-test.log"],
   "limitations": [
