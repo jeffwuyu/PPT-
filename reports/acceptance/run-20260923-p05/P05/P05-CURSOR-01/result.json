@@ -1,0 +1,17 @@
+{
+  "caseId": "P05-CURSOR-01",
+  "status": "PASS",
+  "commit": "896b5b2",
+  "environment": {
+    "javaVersion": "21.0.9",
+    "database": "H2 2.3",
+    "providerMode": "mock",
+    "profile": "test"
+  },
+  "startedAt": "2026-09-23T18:46:45+08:00",
+  "finishedAt": "2026-09-23T18:47:19+08:00",
+  "expected": {"invalidLastEventId": "CURSOR_EXPIRED"},
+  "actual": {"testClass": "com.pptagent.api.agent.AgentIntegrationTests", "testsRun": 14, "failures": 0, "errors": 0, "invalidLastEventId": "CURSOR_EXPIRED"},
+  "artifacts": ["command.txt", "logs/maven-test.log"],
+  "limitations": ["This case covers invalid cursor handling only; retention-window overflow and multi-instance replay remain unverified."]
+}
