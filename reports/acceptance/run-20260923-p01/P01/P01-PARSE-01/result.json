@@ -1,7 +1,7 @@
 {
   "caseId": "P01-PARSE-01",
   "status": "PASS",
-  "commit": "6e22851",
+  "commit": "3b86191",
   "environment": {
     "javaVersion": "21.0.9",
     "database": "H2 2.3",
@@ -14,6 +14,7 @@
     "format": "Markdown",
     "status": "SUCCEEDED",
     "blocks": 2,
+    "blockTypes": ["title", "paragraph"],
     "idempotentResubmission": true,
     "queryEndpoint": "GET /api/agent/sources/parse-jobs/{id}"
   },
@@ -24,6 +25,7 @@
     "errors": 0,
     "status": "SUCCEEDED",
     "blocks": 2,
+    "blockTypes": ["title", "paragraph"],
     "sameParseJobIdOnRetry": true,
     "sourceHashPersisted": true
   },
