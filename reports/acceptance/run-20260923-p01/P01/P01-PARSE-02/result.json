@@ -1,7 +1,7 @@
 {
   "caseId": "P01-PARSE-02",
   "status": "PASS",
-  "commit": "01899dd",
+  "commit": "d4e5d26",
   "environment": {
     "javaVersion": "21.0.9",
     "database": "H2 2.3",
@@ -33,7 +33,8 @@
     "pdfLocatorPersisted": true,
     "docxTablePersisted": true,
     "ocrRequired": true,
-    "emptyDocument": true
+    "emptyDocument": true,
+    "failedJobsHaveNoBlocks": true
   },
   "artifacts": ["command.txt", "logs/maven-test.log"],
   "limitations": [
