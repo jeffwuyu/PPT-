@@ -11,4 +11,8 @@ public interface AgentSourceBlockRepository extends BaseMapper<AgentSourceBlockE
         return selectList(new QueryWrapper<AgentSourceBlockEntity>()
                 .eq("parse_job_id", parseJobId).orderByAsc("id"));
     }
+
+    default int deleteByParseJobId(Long parseJobId) {
+        return delete(new QueryWrapper<AgentSourceBlockEntity>().eq("parse_job_id", parseJobId));
+    }
 }

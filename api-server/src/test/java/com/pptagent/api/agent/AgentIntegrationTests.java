@@ -175,10 +175,12 @@ class AgentIntegrationTests {
         JsonNode imageOnlyPdf = parseUploadedSource(token, "scan.pdf", "application/pdf", blankPdfBytes(), "ocr");
         assertThat(imageOnlyPdf.at("/data/status").asText()).isEqualTo("FAILED");
         assertThat(imageOnlyPdf.at("/data/failureReason").asText()).isEqualTo("OCR_REQUIRED");
+        assertThat(imageOnlyPdf.at("/data/blocks")).isEmpty();
 
         JsonNode emptyTxt = parseUploadedSource(token, "empty.txt", "text/plain", " \n ".getBytes(java.nio.charset.StandardCharsets.UTF_8), "empty");
         assertThat(emptyTxt.at("/data/status").asText()).isEqualTo("FAILED");
         assertThat(emptyTxt.at("/data/failureReason").asText()).isEqualTo("EMPTY_DOCUMENT");
+        assertThat(emptyTxt.at("/data/blocks")).isEmpty();
     }
 
     @Test
