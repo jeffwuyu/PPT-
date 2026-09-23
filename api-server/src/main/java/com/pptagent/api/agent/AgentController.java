@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -91,6 +92,23 @@ public class AgentController {
             @PathVariable Long id
     ) {
         return ApiResponse.ok(agentJobService.approvePlan(user.id(), id));
+    }
+
+    @GetMapping("/jobs/{id}/outline")
+    public ApiResponse<AgentResponse.OutlineResponse> getOutline(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id
+    ) {
+        return ApiResponse.ok(agentJobService.getOutline(user.id(), id));
+    }
+
+    @PutMapping("/jobs/{id}/outline")
+    public ApiResponse<AgentResponse.OutlineResponse> updateOutline(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id,
+            @Valid @RequestBody AgentRequests.UpdateOutlineRequest request
+    ) {
+        return ApiResponse.ok(agentJobService.updateOutline(user.id(), id, request));
     }
 
     @PostMapping("/jobs/{id}/execute")

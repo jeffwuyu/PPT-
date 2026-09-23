@@ -22,6 +22,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -226,6 +227,45 @@ class AgentIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0]").value("jsoup_web_fetch"))
                 .andExpect(jsonPath("$.data[1]").value("bailian_image_generate"));
+    }
+
+    @Test
+    void outlineUsesRevisionAndRejectsStaleEditors() throws Exception {
+        String token = registerAndToken("agent-outline");
+        long presentationId = createPresentation(token, "Outline Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "Create an outline").at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        JsonNode outline = objectMapper.readTree(mockMvc.perform(get("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.revision").value(1))
+                .andReturn().getResponse().getContentAsString());
+        String update = "{\"expectedRevision\":1,\"outline\":{\"pages\":[{\"pageId\":\"page-1\",\"order\":1,\"title\":\"Executive summary\",\"objective\":\"Explain the product\",\"keyPoints\":[\"Problem\",\"Solution\"],\"sourceBlockIds\":[]}]}}";
+        mockMvc.perform(put("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(update))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.revision").value(2));
+
+        mockMvc.perform(put("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(update))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
+
+        mockMvc.perform(put("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedRevision\":2,\"outline\":{\"pages\":[{\"pageId\":\"page-1\",\"order\":1,\"title\":\"Executive summary\",\"objective\":\"Explain the product\",\"keyPoints\":[\"Problem\",\"Solution\"],\"sourceBlockIds\":[]}]},\"approve\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.approved").value(true))
+                .andExpect(jsonPath("$.data.approvedRevision").value(3));
     }
 
     private JsonNode createJob(String token, long presentationId, String prompt) throws Exception {

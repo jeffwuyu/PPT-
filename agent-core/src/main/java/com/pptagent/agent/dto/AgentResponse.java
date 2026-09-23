@@ -18,6 +18,16 @@ public record AgentResponse(
         String translatedPlanMarkdown,
         List<CheckpointResponse> checkpoints
 ) {
+
+    public record OutlineResponse(
+            Long jobId,
+            Long planId,
+            int revision,
+            boolean approved,
+            Integer approvedRevision,
+            JsonNode outline
+    ) {
+    }
     public record CheckpointResponse(
             Long id,
             int order,

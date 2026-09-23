@@ -23,4 +23,11 @@ public final class AgentRequests {
             @NotNull JsonNode arguments
     ) {
     }
+
+    public record UpdateOutlineRequest(
+            @NotNull Integer expectedRevision,
+            @NotNull JsonNode outline,
+            Boolean approve
+    ) {
+    }
 }

@@ -2,6 +2,7 @@ package com.pptagent.agent.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.pptagent.agent.ai.AgentAiClient;
 import com.pptagent.agent.config.AgentProperties;
 import com.pptagent.agent.dto.AgentRequests;
@@ -155,6 +156,7 @@ public class AgentJobService {
         String markdown = aiClient.generatePlan(buildPlanningPrompt(job), memory);
         String translatedMarkdown = aiClient.translatePlan(markdown);
         AgentPlanEntity plan = new AgentPlanEntity(job.getId(), markdown, planJson(markdown, translatedMarkdown), nextPlanVersion(job.getId()));
+        plan.initializeOutline(outlineJson(job.getId(), markdown));
         planRepository.insert(plan);
         messageRepository.insert(new AgentMessageEntity(job.getId(), null, "ASSISTANT", markdown, jsonService.emptyObject()));
         messageRepository.insert(new AgentMessageEntity(job.getId(), null, "ASSISTANT_TRANSLATION", translatedMarkdown, jsonService.emptyObject()));
@@ -168,17 +170,29 @@ public class AgentJobService {
     @Transactional
     public AgentResponse approvePlan(Long userId, Long jobId) {
         AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (job.getStatus() == AgentJobStatus.EXECUTING || job.getStatus() == AgentJobStatus.GENERATED
+                || job.getStatus() == AgentJobStatus.PUBLISHED) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Approved outline is immutable after generation starts");
+        }
         AgentPlanEntity plan = latestPlan(job.getId());
+        plan.approveOutline();
+        planRepository.updateById(plan);
         if (!checkpointRepository.existsForJob(job.getId())) {
-            List<AgentPlanParser.ParsedCheckpoint> parsed = planParser.parse(plan.getPlanMarkdown(), agentProperties.maxPlanSlides());
+            JsonNode approvedPages = jsonService.fromJson(plan.getApprovedOutlineJson()).path("pages");
             int order = 1;
-            for (AgentPlanParser.ParsedCheckpoint checkpoint : parsed) {
+            for (JsonNode page : approvedPages) {
+                String title = page.path("title").asText();
+                String objective = page.path("objective").asText();
+                String keyPoints = page.path("keyPoints").isArray()
+                        ? java.util.stream.StreamSupport.stream(page.path("keyPoints").spliterator(), false)
+                                .map(JsonNode::asText).filter(value -> !value.isBlank()).reduce((a, b) -> a + "; " + b).orElse("")
+                        : "";
                 checkpointRepository.insert(new AgentCheckpointEntity(
                         job.getId(),
                         plan.getId(),
                         order++,
-                        checkpoint.title(),
-                        checkpoint.objective(),
+                        title,
+                        keyPoints.isBlank() ? objective : objective + " Key points: " + keyPoints,
                         agentProperties.defaultCheckpointMaxIterations()
                 ));
             }
@@ -188,10 +202,42 @@ public class AgentJobService {
         return buildResponse(job);
     }
 
+    @Transactional(readOnly = true)
+    public AgentResponse.OutlineResponse getOutline(Long userId, Long jobId) {
+        AgentJobEntity job = loadReadableJob(userId, jobId);
+        AgentPlanEntity plan = latestPlan(job.getId());
+        return outlineResponse(plan);
+    }
+
+    @Transactional
+    public AgentResponse.OutlineResponse updateOutline(Long userId, Long jobId, AgentRequests.UpdateOutlineRequest request) {
+        AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (job.getStatus() == AgentJobStatus.EXECUTING || job.getStatus() == AgentJobStatus.GENERATED
+                || job.getStatus() == AgentJobStatus.PUBLISHED) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Outline cannot be edited after generation starts");
+        }
+        AgentPlanEntity plan = latestPlan(job.getId());
+        validateOutline(request.outline());
+        int updated = planRepository.updateOutlineIfRevision(plan.getId(), request.expectedRevision(), request.outline().toString());
+        if (updated != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Outline revision is stale");
+        }
+        AgentPlanEntity current = latestPlan(job.getId());
+        if (Boolean.TRUE.equals(request.approve())) {
+            current.approveOutline();
+            planRepository.updateById(current);
+        }
+        return outlineResponse(latestPlan(job.getId()));
+    }
+
     @Transactional
     public AgentResponse execute(Long userId, Long jobId) {
         AgentJobEntity job = loadEditableJob(userId, jobId);
-        latestPlan(job.getId());
+        AgentPlanEntity approvedPlan = latestPlan(job.getId());
+        if (approvedPlan.getApprovedOutlineRevision() == null
+                || approvedPlan.getApprovedOutlineRevision() != approvedPlan.getOutlineRevision()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Current outline revision must be approved before execution");
+        }
         if (!checkpointRepository.existsForJob(job.getId())) {
             throw new PlatformException(ErrorCode.CONFLICT, "Agent plan must be approved before execution");
         }
@@ -468,6 +514,54 @@ public class AgentJobService {
         node.put("translatedMarkdown", translatedMarkdown == null ? "" : translatedMarkdown);
         node.put("translatedLength", translatedMarkdown == null ? 0 : translatedMarkdown.length());
         return jsonService.toJson(node);
+    }
+
+    private String outlineJson(Long jobId, String markdown) {
+        ObjectNode outline = jsonService.objectNode();
+        ArrayNode pages = outline.putArray("pages");
+        int order = 1;
+        for (AgentPlanParser.ParsedCheckpoint checkpoint : planParser.parse(markdown, agentProperties.maxPlanSlides())) {
+            ObjectNode page = pages.addObject();
+            page.put("pageId", "job-%d-page-%d".formatted(jobId, order));
+            page.put("order", order++);
+            page.put("title", checkpoint.title());
+            page.put("objective", checkpoint.objective());
+            page.putArray("keyPoints").add(checkpoint.objective());
+            page.putArray("sourceBlockIds");
+        }
+        return jsonService.toJson(outline);
+    }
+
+    private void validateOutline(JsonNode outline) {
+        if (outline == null || !outline.isObject() || !outline.path("pages").isArray()) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline must contain a pages array");
+        }
+        java.util.Set<String> pageIds = new java.util.HashSet<>();
+        int order = 1;
+        for (JsonNode page : outline.path("pages")) {
+            String pageId = page.path("pageId").asText("").trim();
+            if (pageId.isBlank() || !pageIds.add(pageId)) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline pageId must be present and unique");
+            }
+            if (page.path("title").asText("").isBlank() || page.path("objective").asText("").isBlank()) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page title and objective are required");
+            }
+            if (page.has("order") && page.path("order").asInt(order) != order) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page order must be contiguous");
+            }
+            order++;
+        }
+    }
+
+    private AgentResponse.OutlineResponse outlineResponse(AgentPlanEntity plan) {
+        return new AgentResponse.OutlineResponse(
+                plan.getJobId(),
+                plan.getId(),
+                plan.getOutlineRevision(),
+                plan.getApprovedOutlineRevision() != null,
+                plan.getApprovedOutlineRevision(),
+                jsonService.fromJson(plan.getOutlineJson())
+        );
     }
 
     private String sourceExcerpt(Long jobId) {
