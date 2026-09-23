@@ -226,8 +226,10 @@ public class AgentJobService {
         if (!checkpointRepository.existsForJob(job.getId())) {
             throw new PlatformException(ErrorCode.CONFLICT, "Agent plan must be approved before execution");
         }
+        if (jobRepository.startLegacyExecution(jobId) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Agent job is already executing or has an active generation");
+        }
         job.changeStatus(AgentJobStatus.EXECUTING);
-        jobRepository.updateById(job);
         publishJobEvent("checkpoint", job, null, "Agent execution started");
 
         for (AgentCheckpointEntity checkpoint : checkpointRepository.findByJobIdOrderByCheckpointOrder(job.getId())) {
@@ -242,6 +244,55 @@ public class AgentJobService {
                 return buildResponse(job);
             }
         }
+        job.changeStatus(AgentJobStatus.GENERATED);
+        jobRepository.updateById(job);
+        publishJobEvent("done", job, null, "Agent execution completed");
+        return buildResponse(job);
+    }
+
+    @Transactional
+    public AgentResponse executeGenerationPage(Long userId, Long jobId, Long generationJobId, int pageOrder) {
+        AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (!generationJobId.equals(job.getActiveGenerationJobId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Generation no longer owns the Agent job");
+        }
+        AgentPlanEntity plan = latestPlan(jobId);
+        if (plan.getApprovedOutlineRevision() == null
+                || !plan.getApprovedOutlineRevision().equals(plan.getOutlineRevision())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Approved outline changed before page execution");
+        }
+        List<AgentCheckpointEntity> checkpoints = checkpointRepository.findByJobIdOrderByCheckpointOrder(jobId);
+        if (pageOrder < 1 || pageOrder > checkpoints.size()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Generation page has no matching checkpoint");
+        }
+        AgentCheckpointEntity checkpoint = checkpoints.get(pageOrder - 1);
+        if (checkpoint.getStatus() == AgentCheckpointStatus.COMPLETED) return buildResponse(job);
+        if (job.getStatus() != AgentJobStatus.EXECUTING) {
+            if (jobRepository.startGeneration(jobId, generationJobId) != 1) {
+                throw new PlatformException(ErrorCode.CONFLICT, "Generation no longer owns the Agent job");
+            }
+            job.changeStatus(AgentJobStatus.EXECUTING);
+        }
+        executeCheckpoint(userId, job, checkpoint);
+        if (checkpoint.getStatus() == AgentCheckpointStatus.FAILED) {
+            job.fail(checkpoint.getFailureReason());
+            jobRepository.updateById(job);
+            publishJobEvent("error", job, checkpoint, checkpoint.getFailureReason());
+        }
+        return buildResponse(job);
+    }
+
+    @Transactional
+    public AgentResponse completeGeneration(Long userId, Long jobId, Long generationJobId) {
+        AgentJobEntity job = loadEditableJob(userId, jobId);
+        if (!generationJobId.equals(job.getActiveGenerationJobId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Generation no longer owns the Agent job");
+        }
+        if (job.getStatus() == AgentJobStatus.FAILED) return buildResponse(job);
+        boolean incomplete = checkpointRepository.findByJobIdOrderByCheckpointOrder(jobId).stream()
+                .anyMatch(checkpoint -> checkpoint.getStatus() != AgentCheckpointStatus.COMPLETED
+                        && checkpoint.getStatus() != AgentCheckpointStatus.CANCELLED);
+        if (incomplete) throw new PlatformException(ErrorCode.CONFLICT, "Generation still has incomplete pages");
         job.changeStatus(AgentJobStatus.GENERATED);
         jobRepository.updateById(job);
         publishJobEvent("done", job, null, "Agent execution completed");

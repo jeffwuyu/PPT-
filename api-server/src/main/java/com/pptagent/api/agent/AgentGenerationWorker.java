@@ -1,9 +1,11 @@
 package com.pptagent.api.agent;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.pptagent.agent.dto.AgentResponse;
 import com.pptagent.agent.service.AgentJobService;
 import com.pptagent.domain.agent.AgentGenerationJobEntity;
 import com.pptagent.domain.agent.AgentGenerationPageTaskEntity;
+import com.pptagent.domain.agent.AgentJobStatus;
 import com.pptagent.domain.agent.repository.AgentGenerationJobRepository;
 import com.pptagent.domain.agent.repository.AgentGenerationPageTaskRepository;
 import org.springframework.scheduling.annotation.Async;
@@ -29,13 +31,32 @@ public class AgentGenerationWorker {
     @Async
     public void execute(Long generationJobId, Long ownerUserId, Long agentJobId) {
         if (transition(generationJobId, ownerUserId, "QUEUED", "RUNNING") != 1) return;
-        try {
-            var response = agentJobService.execute(ownerUserId, agentJobId);
-            String status = response.status().name().equals("GENERATED") ? "SUCCEEDED" : "FAILED";
-            finish(generationJobId, ownerUserId, status,
-                    status.equals("FAILED") ? response.failureReason() : null);
-        } catch (RuntimeException exception) {
-            finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
+        for (AgentGenerationPageTaskEntity page : pageTasks.findByGenerationJobId(generationJobId)) {
+            if (transitionPage(page.getId(), "PENDING", "RUNNING") != 1) continue;
+            try {
+                AgentResponse result = agentJobService.executeGenerationPage(
+                        ownerUserId, agentJobId, generationJobId, page.getPageOrder() + 1);
+                if (result.status() == AgentJobStatus.FAILED) {
+                    completePage(page.getId(), "FAILED", result.failureReason());
+                    finish(generationJobId, ownerUserId, "FAILED", result.failureReason());
+                    return;
+                }
+                completePage(page.getId(), "SUCCEEDED", null);
+                incrementCompleted(generationJobId, ownerUserId);
+            } catch (RuntimeException exception) {
+                completePage(page.getId(), "FAILED", exception.getMessage());
+                finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
+                return;
+            }
+        }
+        AgentGenerationJobEntity current = generationJobs.selectById(generationJobId);
+        if (current != null && current.getCompletedPages() == current.getTotalPages()) {
+            try {
+                agentJobService.completeGeneration(ownerUserId, agentJobId, generationJobId);
+                finish(generationJobId, ownerUserId, "SUCCEEDED", null);
+            } catch (RuntimeException exception) {
+                finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
+            }
         }
     }
 
@@ -52,15 +73,29 @@ public class AgentGenerationWorker {
         int updated = generationJobs.update(null, new UpdateWrapper<AgentGenerationJobEntity>()
                 .eq("id", id).eq("owner_user_id", owner).eq("status", "RUNNING")
                 .set("status", status).set("failure_reason", failureReason)
-                .set("completed_pages", "SUCCEEDED".equals(status)
-                        ? generationJobs.selectById(id).getTotalPages() : 0)
                 .setSql("revision = revision + 1")
                 .set("updated_at", Instant.now()));
-        if (updated == 1) {
-            pageTasks.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
-                    .eq("generation_job_id", id).eq("status", "PENDING")
-                    .set("status", "SUCCEEDED".equals(status) ? "SUCCEEDED" : "FAILED")
-                    .set("failure_reason", failureReason).set("updated_at", Instant.now()));
-        }
+    }
+
+    @Transactional
+    int transitionPage(Long id, String expected, String next) {
+        return pageTasks.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
+                .eq("id", id).eq("status", expected).set("status", next)
+                .setSql("attempts = attempts + 1").set("updated_at", Instant.now()));
+    }
+
+    @Transactional
+    void completePage(Long id, String status, String failureReason) {
+        pageTasks.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
+                .eq("id", id).eq("status", "RUNNING").set("status", status)
+                .set("failure_reason", failureReason).set("updated_at", Instant.now()));
+    }
+
+    @Transactional
+    void incrementCompleted(Long id, Long owner) {
+        generationJobs.update(null, new UpdateWrapper<AgentGenerationJobEntity>()
+                .eq("id", id).eq("owner_user_id", owner).eq("status", "RUNNING")
+                .setSql("completed_pages = completed_pages + 1, revision = revision + 1")
+                .set("updated_at", Instant.now()));
     }
 }

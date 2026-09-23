@@ -311,6 +311,21 @@ class AgentIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.agentJobId").value(jobId))
                 .andExpect(jsonPath("$.data.totalPages").value(2));
+
+        JsonNode completed = null;
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            completed = objectMapper.readTree(mockMvc.perform(get("/api/agent/generations/" + generationId)
+                            .header("Authorization", "Bearer " + token))
+                    .andReturn().getResponse().getContentAsString());
+            String status = completed.at("/data/status").asText();
+            if ("SUCCEEDED".equals(status) || "FAILED".equals(status)) break;
+            Thread.sleep(25);
+        }
+        assertThat(completed).isNotNull();
+        assertThat(completed.at("/data/status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(completed.at("/data/completedPages").asInt()).isEqualTo(2);
+        assertThat(completed.at("/data/pages").findValuesAsText("status")).containsOnly("SUCCEEDED");
     }
 
     @Test

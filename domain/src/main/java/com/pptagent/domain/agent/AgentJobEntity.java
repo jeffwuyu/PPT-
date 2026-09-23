@@ -13,6 +13,7 @@ public class AgentJobEntity {
     private Long ownerUserId;
     private Long presentationId;
     private AgentJobStatus status;
+    private Long activeGenerationJobId;
     private String promptText;
     private String failureReason;
     private Instant createdAt;
@@ -44,6 +45,10 @@ public class AgentJobEntity {
 
     public AgentJobStatus getStatus() {
         return status;
+    }
+
+    public Long getActiveGenerationJobId() {
+        return activeGenerationJobId;
     }
 
     public String getPromptText() {

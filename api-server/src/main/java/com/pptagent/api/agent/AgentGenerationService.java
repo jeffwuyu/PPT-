@@ -73,6 +73,9 @@ public class AgentGenerationService {
         AgentGenerationJobEntity generation = new AgentGenerationJobEntity(agentJobId, ownerUserId,
                 agentJob.getPresentationId(), request.idempotencyKey(), plan.getApprovedOutlineRevision(), pages.size());
         generationJobs.insert(generation);
+        if (agentJobs.claimForGeneration(agentJobId, generation.getId()) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Agent job already has an active generation or has started through the legacy executor");
+        }
         for (Page page : pages) pageTasks.insert(new AgentGenerationPageTaskEntity(generation.getId(), page.id(), page.order()));
         Long generationId = generation.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
