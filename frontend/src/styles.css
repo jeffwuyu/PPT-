@@ -115,6 +115,36 @@ a {
   gap: 14px;
 }
 
+.outline-editor {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #d9dee8;
+}
+
+.outline-page {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d9dee8;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.outline-page-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.outline-page-tools strong {
+  margin-right: auto;
+}
+
+.outline-page .textarea {
+  min-height: 72px;
+}
+
 .field {
   display: grid;
   gap: 6px;

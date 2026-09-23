@@ -99,6 +99,24 @@ export type AgentJob = {
   checkpoints: Checkpoint[];
 };
 
+export type AgentOutlinePage = {
+  pageId: string;
+  order: number;
+  title: string;
+  objective: string;
+  keyPoints: string[];
+  sourceBlockIds: number[];
+};
+
+export type AgentOutline = {
+  jobId: number;
+  planId: number;
+  revision: number;
+  approved: boolean;
+  approvedRevision: number | null;
+  outline: { pages: AgentOutlinePage[] };
+};
+
 export type FileAsset = {
   id: number;
   fileType: string;

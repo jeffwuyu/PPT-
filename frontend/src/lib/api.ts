@@ -1,5 +1,6 @@
 import type {
   AgentJob,
+  AgentOutline,
   ApiResponse,
   AuthResponse,
   FileAsset,
@@ -210,6 +211,17 @@ export function planAgentJob(jobId: number) {
 
 export function approveAgentPlan(jobId: number) {
   return apiRequest<AgentJob>(`/agent/jobs/${jobId}/approve-plan`, { method: 'POST' });
+}
+
+export function getAgentOutline(jobId: number) {
+  return apiRequest<AgentOutline>(`/agent/jobs/${jobId}/outline`);
+}
+
+export function updateAgentOutline(jobId: number, expectedRevision: number, pages: AgentOutline['outline']['pages'], approve = false) {
+  return apiRequest<AgentOutline>(`/agent/jobs/${jobId}/outline`, {
+    method: 'PUT',
+    body: JSON.stringify({ expectedRevision, outline: { pages }, approve })
+  });
 }
 
 export function executeAgentJob(jobId: number) {

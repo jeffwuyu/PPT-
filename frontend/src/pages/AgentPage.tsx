@@ -1,20 +1,22 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import { Check, Download, Edit3, FileUp, Play, Sparkles, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Download, Edit3, FileUp, Play, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import AgentProgressPanel from '../components/AgentProgressPanel';
 import {
   approveAgentPlan,
   createAgentJob,
   executeAgentJob,
+  getAgentOutline,
   getPresentation,
   planAgentJob,
   publishAgentJob,
   sseUrl,
+  updateAgentOutline,
   uploadFile
 } from '../lib/api';
 import { getAccessToken } from '../lib/storage';
-import type { AgentJob, FileAsset, Presentation, ProgressEvent, ProgressSnapshot } from '../types';
+import type { AgentJob, AgentOutlinePage, FileAsset, Presentation, ProgressEvent, ProgressSnapshot } from '../types';
 
 export default function AgentPage() {
   const { id } = useParams();
@@ -23,6 +25,8 @@ export default function AgentPage() {
   const [prompt, setPrompt] = useState('请基于上传材料生成一份结构清晰、适合汇报的 PPT。');
   const [sources, setSources] = useState<FileAsset[]>([]);
   const [job, setJob] = useState<AgentJob | null>(null);
+  const [outlinePages, setOutlinePages] = useState<AgentOutlinePage[]>([]);
+  const [outlineRevision, setOutlineRevision] = useState<number | null>(null);
   const [snapshot, setSnapshot] = useState<ProgressSnapshot | null>(null);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -71,7 +75,10 @@ export default function AgentPage() {
       setJob(created);
       const planned = await planAgentJob(created.id);
       setJob(planned);
-      setNotice('计划已生成，请审核中文译文和原始计划后执行。');
+      const outline = await getAgentOutline(created.id);
+      setOutlinePages(outline.outline.pages);
+      setOutlineRevision(outline.revision);
+      setNotice('计划已生成，可编辑页级大纲后批准。');
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : '生成计划失败');
     } finally {
@@ -90,6 +97,8 @@ export default function AgentPage() {
     setSnapshot(null);
     startSse(job.id);
     try {
+      const approvedOutline = await updateAgentOutline(job.id, outlineRevision ?? 1, outlinePages, true);
+      setOutlineRevision(approvedOutline.revision);
       const approved = await approveAgentPlan(job.id);
       setJob(approved);
       const executed = await executeAgentJob(job.id);
@@ -100,6 +109,35 @@ export default function AgentPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function updatePage(index: number, patch: Partial<AgentOutlinePage>) {
+    setOutlinePages((pages) => pages.map((page, pageIndex) => pageIndex === index ? { ...page, ...patch } : page));
+  }
+
+  function movePage(index: number, offset: number) {
+    setOutlinePages((pages) => {
+      const target = index + offset;
+      if (target < 0 || target >= pages.length) return pages;
+      const next = [...pages];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next.map((page, pageIndex) => ({ ...page, order: pageIndex + 1 }));
+    });
+  }
+
+  function addPage() {
+    setOutlinePages((pages) => [...pages, {
+      pageId: `page-${crypto.randomUUID()}`,
+      order: pages.length + 1,
+      title: '新页面',
+      objective: '说明本页要传达的结论',
+      keyPoints: [],
+      sourceBlockIds: []
+    }]);
+  }
+
+  function removePage(index: number) {
+    setOutlinePages((pages) => pages.filter((_, pageIndex) => pageIndex !== index).map((page, pageIndex) => ({ ...page, order: pageIndex + 1 })));
   }
 
   async function publish() {
@@ -235,7 +273,27 @@ export default function AgentPage() {
                   <pre className="markdown-box">{job.planMarkdown}</pre>
                 </section>
               </div>
-              <button className="button" disabled={busy} onClick={approveAndExecute}>
+              <div className="outline-editor">
+                <div className="row">
+                  <strong>页级大纲</strong>
+                  <span className="muted">版本 {outlineRevision ?? '-'}</span>
+                  <button className="secondary-button" disabled={busy} onClick={addPage}><Plus size={15} />添加页面</button>
+                </div>
+                {outlinePages.map((page, index) => (
+                  <section className="outline-page" key={page.pageId}>
+                    <div className="outline-page-tools">
+                      <strong>第 {index + 1} 页</strong>
+                      <button className="icon-button" title="上移" disabled={index === 0 || busy} onClick={() => movePage(index, -1)}><ArrowUp size={16} /></button>
+                      <button className="icon-button" title="下移" disabled={index === outlinePages.length - 1 || busy} onClick={() => movePage(index, 1)}><ArrowDown size={16} /></button>
+                      <button className="icon-button danger" title="删除页面" disabled={busy} onClick={() => removePage(index)}><Trash2 size={16} /></button>
+                    </div>
+                    <label className="field">标题<input className="input" value={page.title} onChange={(event) => updatePage(index, { title: event.target.value })} /></label>
+                    <label className="field">页面目标<textarea className="textarea" value={page.objective} onChange={(event) => updatePage(index, { objective: event.target.value })} /></label>
+                    <label className="field">要点（每行一条）<textarea className="textarea" value={page.keyPoints.join('\n')} onChange={(event) => updatePage(index, { keyPoints: event.target.value.split('\n').map((item) => item.trim()).filter(Boolean) })} /></label>
+                  </section>
+                ))}
+              </div>
+              <button className="button" disabled={busy || outlinePages.length === 0 || outlinePages.some((page) => !page.title.trim() || !page.objective.trim())} onClick={approveAndExecute}>
                 {busy ? <Play size={18} /> : <Check size={18} />}
                 {busy ? '执行中' : '确认计划并执行'}
               </button>
