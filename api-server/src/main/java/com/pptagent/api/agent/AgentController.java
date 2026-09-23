@@ -8,6 +8,8 @@ import com.pptagent.api.presentation.PresentationExportService;
 import com.pptagent.api.presentation.dto.PresentationExportResponse;
 import com.pptagent.api.agent.dto.GenerationJobResponse;
 import com.pptagent.api.agent.dto.GenerationSubmissionRequest;
+import com.pptagent.api.agent.dto.SourceParseRequest;
+import com.pptagent.api.agent.dto.SourceParseResponse;
 import com.pptagent.api.security.AuthenticatedUser;
 import com.pptagent.common.api.ApiResponse;
 import jakarta.validation.Valid;
@@ -36,6 +38,7 @@ public class AgentController {
     private final AgentProgressStreamService progressStreamService;
     private final AgentProgressSnapshotService progressSnapshotService;
     private final AgentGenerationService generationService;
+    private final SourceParseService sourceParseService;
 
     public AgentController(
             AgentJobService agentJobService,
@@ -43,7 +46,8 @@ public class AgentController {
             PresentationExportService presentationExportService,
             AgentProgressStreamService progressStreamService,
             AgentProgressSnapshotService progressSnapshotService,
-            AgentGenerationService generationService
+            AgentGenerationService generationService,
+            SourceParseService sourceParseService
     ) {
         this.agentJobService = agentJobService;
         this.toolRegistry = toolRegistry;
@@ -51,6 +55,23 @@ public class AgentController {
         this.progressStreamService = progressStreamService;
         this.progressSnapshotService = progressSnapshotService;
         this.generationService = generationService;
+        this.sourceParseService = sourceParseService;
+    }
+
+    @PostMapping("/sources/parse")
+    public ApiResponse<SourceParseResponse> parseSource(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @Valid @RequestBody SourceParseRequest request
+    ) {
+        return ApiResponse.ok(sourceParseService.submit(user.id(), request));
+    }
+
+    @GetMapping("/sources/parse-jobs/{parseJobId}")
+    public ApiResponse<SourceParseResponse> getSourceParse(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long parseJobId
+    ) {
+        return ApiResponse.ok(sourceParseService.get(user.id(), parseJobId));
     }
 
     @PostMapping("/jobs")

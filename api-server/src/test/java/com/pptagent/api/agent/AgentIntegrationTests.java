@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 
@@ -25,6 +26,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -66,6 +68,44 @@ class AgentIntegrationTests {
         assertThat(executor.getCorePoolSize()).isEqualTo(4);
         assertThat(executor.getMaxPoolSize()).isEqualTo(4);
         assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isEqualTo(100);
+    }
+
+    @Test
+    void sourceParsePersistsStructuredBlocksAndReusesIdempotencyKey() throws Exception {
+        String token = registerAndToken("source-parse");
+        JsonNode uploaded = objectMapper.readTree(mockMvc.perform(multipart("/api/files/upload")
+                        .file(new MockMultipartFile("file", "brief.md", "text/markdown",
+                                "# Product brief\n\nA reliable workflow.".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                        .param("fileType", "SOURCE_TEXT")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        long fileId = uploaded.at("/data/id").asLong();
+
+        JsonNode parsed = objectMapper.readTree(mockMvc.perform(post("/api/agent/sources/parse")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileAssetId\":%d,\"idempotencyKey\":\"parse-1\"}".formatted(fileId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.totalBlocks").value(2))
+                .andExpect(jsonPath("$.data.blocks.length()").value(2))
+                .andReturn().getResponse().getContentAsString());
+        long parseJobId = parsed.at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/sources/parse")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileAssetId\":%d,\"idempotencyKey\":\"parse-1\"}".formatted(fileId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(parseJobId))
+                .andExpect(jsonPath("$.data.blocks.length()").value(2));
+
+        mockMvc.perform(get("/api/agent/sources/parse-jobs/" + parseJobId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sourceHash").isNotEmpty())
+                .andExpect(jsonPath("$.data.blocks[0].text").isNotEmpty());
     }
 
     @Test
