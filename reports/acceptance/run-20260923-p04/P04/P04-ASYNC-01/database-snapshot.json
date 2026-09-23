@@ -1,0 +1,9 @@
+{
+  "source": "AgentIntegrationTests in-memory H2",
+  "migrationVersion": 13,
+  "assertions": {
+    "generationJob": "SUCCEEDED",
+    "completedPages": 2,
+    "pageTasks": ["SUCCEEDED", "SUCCEEDED"]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "caseId": "P04-ASYNC-01",
+  "status": "PASS",
+  "commit": "ca47cd4",
+  "environment": {
+    "javaVersion": "21.0.9",
+    "database": "H2 2.3",
+    "providerMode": "mock",
+    "profile": "test"
+  },
+  "startedAt": "2026-09-23T17:05:09+08:00",
+  "finishedAt": "2026-09-23T17:05:37+08:00",
+  "expected": {
+    "acceptedStatus": 202,
+    "idempotentResubmission": true,
+    "pageCount": 2,
+    "terminalStatus": "SUCCEEDED",
+    "pageStatuses": ["SUCCEEDED", "SUCCEEDED"]
+  },
+  "actual": {
+    "testClass": "com.pptagent.api.agent.AgentIntegrationTests",
+    "testsRun": 12,
+    "failures": 0,
+    "errors": 0,
+    "generationStatus": "SUCCEEDED",
+    "completedPages": 2,
+    "pageStatuses": ["SUCCEEDED", "SUCCEEDED"]
+  },
+  "artifacts": [
+    "command.txt",
+    "logs/maven-test.log",
+    "database-snapshot.json",
+    "events.jsonl"
+  ],
+  "limitations": [
+    "This evidence covers the deterministic async page execution and idempotency case only.",
+    "Lease takeover, running cancellation, global concurrency and real-provider performance remain unverified."
+  ]
+}

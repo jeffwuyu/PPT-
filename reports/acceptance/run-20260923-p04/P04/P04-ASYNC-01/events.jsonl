@@ -1,0 +1,3 @@
+{"source":"AgentIntegrationTests","event":"generation.accepted","httpStatus":202}
+{"source":"AgentIntegrationTests","event":"generation.idempotent","sameGenerationId":true}
+{"source":"AgentIntegrationTests","event":"generation.completed","status":"SUCCEEDED","completedPages":2}
