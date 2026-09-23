@@ -1,0 +1,10 @@
+{
+  "caseId": "P02-OUTLINE-01",
+  "status": "PASS",
+  "commit": "4feaa2f",
+  "environment": {"javaVersion": "21.0.9", "database": "H2 2.3", "providerMode": "mock", "profile": "test"},
+  "actual": {"testClass": "com.pptagent.api.agent.AgentIntegrationTests", "testsRun": 18, "failures": 0, "errors": 0,
+    "revisionConflict": true, "approvedRevisionPersisted": true, "stablePageId": true, "unapprovedGenerationRejected": true},
+  "artifacts": ["command.txt", "logs/maven-test.log"],
+  "limitations": ["Full frontend editing and browser evidence are not included in this backend integration run."]
+}

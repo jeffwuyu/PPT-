@@ -1,0 +1,11 @@
+{
+  "caseId": "P03-CONTENT-01",
+  "status": "PASS",
+  "commit": "4feaa2f",
+  "environment": {"javaVersion": "21.0.9", "database": "H2 2.3", "providerMode": "mock", "profile": "test"},
+  "actual": {"testClass": "com.pptagent.api.agent.AgentIntegrationTests", "testsRun": 18, "failures": 0, "errors": 0,
+    "approvedKeyPointsCovered": true, "placeholderImageWarning": true, "pageGenerationSucceeded": true,
+    "asyncGenerationSucceeded": true, "idempotentSubmission": true},
+  "artifacts": ["command.txt", "logs/maven-test.log"],
+  "limitations": ["Renderer pixel-level overflow and external provider quality are not covered by this mock run."]
+}
