@@ -1,0 +1,17 @@
+{
+  "caseId": "P05-RELAY-01",
+  "status": "BLOCKED",
+  "commit": "105e1bd",
+  "environment": {
+    "javaVersion": "21.0.9",
+    "database": "H2 2.3",
+    "providerMode": "mock",
+    "profile": "test"
+  },
+  "startedAt": "2026-09-23T18:51:30+08:00",
+  "finishedAt": "2026-09-23T18:52:03+08:00",
+  "expected": {"eventCommittedOnInstanceA": "delivered to subscriber on instance B"},
+  "actual": {"relayImplementation": "database polling present", "independentInstances": "not started", "redisWakeup": "not configured"},
+  "artifacts": ["command.txt", "logs/maven-test.log"],
+  "limitations": ["A two-process test with separate application contexts and a Redis outage is required before PASS."]
+}
