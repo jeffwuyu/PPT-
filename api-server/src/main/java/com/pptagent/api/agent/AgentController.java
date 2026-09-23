@@ -6,11 +6,14 @@ import com.pptagent.agent.service.AgentJobService;
 import com.pptagent.agent.tool.AgentMcpToolRegistry;
 import com.pptagent.api.presentation.PresentationExportService;
 import com.pptagent.api.presentation.dto.PresentationExportResponse;
+import com.pptagent.api.agent.dto.GenerationJobResponse;
+import com.pptagent.api.agent.dto.GenerationSubmissionRequest;
 import com.pptagent.api.security.AuthenticatedUser;
 import com.pptagent.common.api.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,19 +35,22 @@ public class AgentController {
     private final PresentationExportService presentationExportService;
     private final AgentProgressStreamService progressStreamService;
     private final AgentProgressSnapshotService progressSnapshotService;
+    private final AgentGenerationService generationService;
 
     public AgentController(
             AgentJobService agentJobService,
             AgentMcpToolRegistry toolRegistry,
             PresentationExportService presentationExportService,
             AgentProgressStreamService progressStreamService,
-            AgentProgressSnapshotService progressSnapshotService
+            AgentProgressSnapshotService progressSnapshotService,
+            AgentGenerationService generationService
     ) {
         this.agentJobService = agentJobService;
         this.toolRegistry = toolRegistry;
         this.presentationExportService = presentationExportService;
         this.progressStreamService = progressStreamService;
         this.progressSnapshotService = progressSnapshotService;
+        this.generationService = generationService;
     }
 
     @PostMapping("/jobs")
@@ -117,6 +123,48 @@ public class AgentController {
             @PathVariable Long id
     ) {
         return ApiResponse.ok(agentJobService.execute(user.id(), id));
+    }
+
+    @PostMapping("/jobs/{id}/generations")
+    public ResponseEntity<ApiResponse<GenerationJobResponse>> submitGeneration(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id,
+            @Valid @RequestBody GenerationSubmissionRequest request
+    ) {
+        GenerationJobResponse response = generationService.submit(user.id(), id, request);
+        return ResponseEntity.accepted().body(ApiResponse.ok(response));
+    }
+
+    @GetMapping("/generations/{generationJobId}")
+    public ApiResponse<GenerationJobResponse> getGeneration(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long generationJobId
+    ) {
+        return ApiResponse.ok(generationService.get(user.id(), generationJobId));
+    }
+
+    @PostMapping("/generations/{generationJobId}/pause")
+    public ApiResponse<GenerationJobResponse> pauseGeneration(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long generationJobId
+    ) {
+        return ApiResponse.ok(generationService.pause(user.id(), generationJobId));
+    }
+
+    @PostMapping("/generations/{generationJobId}/resume")
+    public ApiResponse<GenerationJobResponse> resumeGeneration(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long generationJobId
+    ) {
+        return ApiResponse.ok(generationService.resume(user.id(), generationJobId));
+    }
+
+    @PostMapping("/generations/{generationJobId}/cancel")
+    public ApiResponse<GenerationJobResponse> cancelGeneration(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long generationJobId
+    ) {
+        return ApiResponse.ok(generationService.cancel(user.id(), generationJobId));
     }
 
     @PostMapping("/jobs/{id}/pause")

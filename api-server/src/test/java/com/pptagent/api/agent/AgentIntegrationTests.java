@@ -268,6 +268,47 @@ class AgentIntegrationTests {
                 .andExpect(jsonPath("$.data.approvedRevision").value(3));
     }
 
+    @Test
+    void generationSubmissionReturnsAcceptedAndReusesIdempotencyKey() throws Exception {
+        String token = registerAndToken("agent-generation-async");
+        long presentationId = createPresentation(token, "Async Generation Deck").at("/data/id").asLong();
+        long jobId = createJob(token, presentationId, "Create an async deck").at("/data/id").asLong();
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/plan").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(put("/api/agent/jobs/" + jobId + "/outline")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedRevision":1,"approve":true,"outline":{"pages":[
+                                  {"pageId":"p-1","order":1,"title":"Summary","objective":"Summarize","keyPoints":["A"],"sourceBlockIds":[]},
+                                  {"pageId":"p-2","order":2,"title":"Plan","objective":"Explain plan","keyPoints":["B"],"sourceBlockIds":[]}
+                                ]}}
+                                """))
+                .andExpect(status().isOk());
+
+        JsonNode submitted = objectMapper.readTree(mockMvc.perform(post("/api/agent/jobs/" + jobId + "/generations")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idempotencyKey\":\"generation-1\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.pages.length()").value(2))
+                .andReturn().getResponse().getContentAsString());
+        long generationId = submitted.at("/data/id").asLong();
+
+        mockMvc.perform(post("/api/agent/jobs/" + jobId + "/generations")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idempotencyKey\":\"generation-1\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.id").value(generationId));
+
+        mockMvc.perform(get("/api/agent/generations/" + generationId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.agentJobId").value(jobId))
+                .andExpect(jsonPath("$.data.totalPages").value(2));
+    }
+
     private JsonNode createJob(String token, long presentationId, String prompt) throws Exception {
         return createJob(token, presentationId, prompt, null);
     }
