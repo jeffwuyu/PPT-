@@ -162,6 +162,17 @@ public class SlideElementEntity {
         this.updatedAt = Instant.now();
     }
 
+    public void updateFromAi(String contentJson, String styleJson, Double x, Double y, Double width, Double height) {
+        if (contentJson != null) this.contentJson = contentJson;
+        if (styleJson != null) this.styleJson = styleJson;
+        if (x != null) this.xPosition = x;
+        if (y != null) this.yPosition = y;
+        if (width != null) this.widthValue = width;
+        if (height != null) this.heightValue = height;
+        this.revision++;
+        this.updatedAt = Instant.now();
+    }
+
     public void setSlide(SlideEntity slide) {
         this.slide = slide;
         this.slideId = slide == null ? null : slide.getId();

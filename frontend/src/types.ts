@@ -52,6 +52,8 @@ export type SlideElement = {
   initiallyPresent: boolean;
   content: Record<string, unknown>;
   style: Record<string, unknown>;
+  revision: number;
+  locked: boolean;
 };
 
 export type Slide = {

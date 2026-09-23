@@ -177,26 +177,7 @@ public class AgentJobService {
         AgentPlanEntity plan = latestPlan(job.getId());
         plan.approveOutline();
         planRepository.updateById(plan);
-        if (!checkpointRepository.existsForJob(job.getId())) {
-            JsonNode approvedPages = jsonService.fromJson(plan.getApprovedOutlineJson()).path("pages");
-            int order = 1;
-            for (JsonNode page : approvedPages) {
-                String title = page.path("title").asText();
-                String objective = page.path("objective").asText();
-                String keyPoints = page.path("keyPoints").isArray()
-                        ? java.util.stream.StreamSupport.stream(page.path("keyPoints").spliterator(), false)
-                                .map(JsonNode::asText).filter(value -> !value.isBlank()).reduce((a, b) -> a + "; " + b).orElse("")
-                        : "";
-                checkpointRepository.insert(new AgentCheckpointEntity(
-                        job.getId(),
-                        plan.getId(),
-                        order++,
-                        title,
-                        keyPoints.isBlank() ? objective : objective + " Key points: " + keyPoints,
-                        agentProperties.defaultCheckpointMaxIterations()
-                ));
-            }
-        }
+        ensureCheckpointsFromApprovedOutline(job, plan);
         job.changeStatus(AgentJobStatus.PLANNED);
         jobRepository.updateById(job);
         return buildResponse(job);
@@ -217,6 +198,9 @@ public class AgentJobService {
             throw new PlatformException(ErrorCode.CONFLICT, "Outline cannot be edited after generation starts");
         }
         AgentPlanEntity plan = latestPlan(job.getId());
+        if (checkpointRepository.existsForJob(job.getId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Outline is immutable after it has been approved for execution");
+        }
         validateOutline(request.outline());
         int updated = planRepository.updateOutlineIfRevision(plan.getId(), request.expectedRevision(), request.outline().toString());
         if (updated != 1) {
@@ -226,6 +210,7 @@ public class AgentJobService {
         if (Boolean.TRUE.equals(request.approve())) {
             current.approveOutline();
             planRepository.updateById(current);
+            ensureCheckpointsFromApprovedOutline(job, current);
         }
         return outlineResponse(latestPlan(job.getId()));
     }
@@ -550,6 +535,27 @@ public class AgentJobService {
                 throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page order must be contiguous");
             }
             order++;
+        }
+    }
+
+    private void ensureCheckpointsFromApprovedOutline(AgentJobEntity job, AgentPlanEntity plan) {
+        if (checkpointRepository.existsForJob(job.getId())) {
+            return;
+        }
+        JsonNode approvedPages = jsonService.fromJson(plan.getApprovedOutlineJson()).path("pages");
+        int order = 1;
+        for (JsonNode page : approvedPages) {
+            String title = page.path("title").asText();
+            String objective = page.path("objective").asText();
+            String keyPoints = page.path("keyPoints").isArray()
+                    ? java.util.stream.StreamSupport.stream(page.path("keyPoints").spliterator(), false)
+                            .map(JsonNode::asText).filter(value -> !value.isBlank()).reduce((a, b) -> a + "; " + b).orElse("")
+                    : "";
+            checkpointRepository.insert(new AgentCheckpointEntity(
+                    job.getId(), plan.getId(), order++, title,
+                    keyPoints.isBlank() ? objective : objective + " Key points: " + keyPoints,
+                    agentProperties.defaultCheckpointMaxIterations()
+            ));
         }
     }
 

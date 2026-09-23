@@ -44,7 +44,9 @@ public record PresentationResponse(
             int pageOrder,
             boolean initiallyPresent,
             JsonNode content,
-            JsonNode style
+            JsonNode style,
+            int revision,
+            boolean locked
     ) {
     }
 

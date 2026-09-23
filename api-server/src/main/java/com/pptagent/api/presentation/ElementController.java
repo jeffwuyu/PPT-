@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -48,9 +49,10 @@ public class ElementController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteElement(
             @AuthenticationPrincipal AuthenticatedUser user,
-            @PathVariable Long elementId
+            @PathVariable Long elementId,
+            @Valid @RequestBody PresentationRequests.DeleteElementRequest request
     ) {
-        elementService.deleteElement(user.id(), elementId);
+        elementService.deleteElement(user.id(), elementId, request.expectedRevision());
     }
 
     @PatchMapping("/slides/{slideId}/elements/batch")
@@ -60,5 +62,23 @@ public class ElementController {
             @Valid @RequestBody PresentationRequests.BatchElementRequest request
     ) {
         return ApiResponse.ok(elementService.batchElements(user.id(), slideId, request));
+    }
+
+    @PutMapping("/elements/{elementId}/lock")
+    public ApiResponse<PresentationResponse.ElementResponse> setLock(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long elementId,
+            @Valid @RequestBody PresentationRequests.ElementLockRequest request
+    ) {
+        return ApiResponse.ok(elementService.setLock(user.id(), elementId, request));
+    }
+
+    @PostMapping("/presentations/{presentationId}/ai-edits")
+    public ApiResponse<java.util.List<PresentationResponse.ElementResponse>> aiEdits(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long presentationId,
+            @Valid @RequestBody PresentationRequests.AiEditRequest request
+    ) {
+        return ApiResponse.ok(elementService.applyAiEdits(user.id(), presentationId, request.edits()));
     }
 }

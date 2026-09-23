@@ -82,7 +82,9 @@ public class PresentationResponseMapper {
                 element.getPageOrder(),
                 element.isInitiallyPresent(),
                 preview ? enrichImageContent(element) : jsonService.fromJson(element.getContentJson()),
-                jsonService.fromJson(element.getStyleJson())
+                jsonService.fromJson(element.getStyleJson()),
+                element.getRevision(),
+                element.isLocked()
         );
     }
 

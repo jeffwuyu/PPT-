@@ -75,7 +75,8 @@ public final class PresentationRequests {
             Integer pageOrder,
             Boolean initiallyPresent,
             JsonNode content,
-            JsonNode style
+            JsonNode style,
+            @NotNull Integer expectedRevision
     ) {
     }
 
@@ -98,7 +99,29 @@ public final class PresentationRequests {
             Integer pageOrder,
             Boolean initiallyPresent,
             JsonNode content,
-            JsonNode style
+            JsonNode style,
+            Integer expectedRevision
+    ) {
+    }
+
+    public record ElementLockRequest(@NotNull Integer expectedRevision, @NotNull Boolean locked) {
+    }
+
+    public record DeleteElementRequest(@NotNull Integer expectedRevision) {
+    }
+
+    public record AiEditRequest(@NotNull List<@Valid AiElementEdit> edits) {
+    }
+
+    public record AiElementEdit(
+            @NotNull Long elementId,
+            @NotNull Integer expectedRevision,
+            JsonNode content,
+            JsonNode style,
+            Double x,
+            Double y,
+            Double width,
+            Double height
     ) {
     }
 

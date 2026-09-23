@@ -139,7 +139,7 @@ export default function EditorPage() {
     if (!selectedElement) {
       return;
     }
-    await deleteElement(selectedElement.id);
+    await deleteElement(selectedElement);
     const data = await getPresentation(presentationId);
     publish(data);
     setSelectedElementId(null);

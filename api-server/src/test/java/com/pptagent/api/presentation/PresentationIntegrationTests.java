@@ -21,6 +21,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -270,7 +271,8 @@ class PresentationIntegrationTests {
                                   "height":80,
                                   "zIndex":100,
                                   "content":{"text":"Original text"},
-                                  "style":{"fontSize":24}
+                                  "style":{"fontSize":24},
+                                  "expectedRevision":1
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -306,7 +308,8 @@ class PresentationIntegrationTests {
                                   "height":80,
                                   "zIndex":100,
                                   "content":{"text":"Changed after snapshot"},
-                                  "style":{"fontSize":24}
+                                  "style":{"fontSize":24},
+                                  "expectedRevision":2
                                 }
                                 """))
                 .andExpect(status().isOk());
@@ -320,7 +323,9 @@ class PresentationIntegrationTests {
         assertThat(oldVersion.at("/data/snapshot/slides/0/elements/1/content/text").asText()).isEqualTo("Original text");
 
         mockMvc.perform(delete("/api/elements/" + imageElementId)
-                        .header("Authorization", "Bearer " + token))
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedRevision\":1}"))
                 .andExpect(status().isNoContent());
         JsonNode afterElementDelete = readPreview(token, presentationId);
         assertThat(afterElementDelete.at("/data/slides/0/elements").size()).isEqualTo(1);
@@ -379,6 +384,73 @@ class PresentationIntegrationTests {
         JsonNode preview = readPreview(token, presentationId);
         assertThat(preview.at("/data/slides/0/elements").size()).isEqualTo(1);
         assertThat(preview.at("/data/slides/0/elements/0/content/text").asText()).isEqualTo("Existing");
+    }
+
+    @Test
+    void aiEditsRespectLocksAndRejectStaleOrPartiallyConflictingCommands() throws Exception {
+        String token = registerAndToken("ppt-ai-edit");
+        long presentationId = createPresentation(token, "AI Edit Protection").at("/data/id").asLong();
+        long slideId = createSlide(token, presentationId, null, "Page").at("/data/slides/0/id").asLong();
+        long firstId = createElement(token, slideId, """
+                {"type":"TEXT","x":1,"y":1,"width":100,"height":40,"content":{"text":"First"},"style":{}}
+                """).at("/data/id").asLong();
+        long secondId = createElement(token, slideId, """
+                {"type":"TEXT","x":2,"y":2,"width":100,"height":40,"content":{"text":"Second"},"style":{}}
+                """).at("/data/id").asLong();
+
+        mockMvc.perform(put("/api/elements/" + secondId + "/lock")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedRevision\":1,\"locked\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.locked").value(true))
+                .andExpect(jsonPath("$.data.revision").value(2));
+
+        mockMvc.perform(patch("/api/elements/" + secondId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"type":"TEXT","x":2,"y":2,"width":100,"height":40,
+                                 "content":{"text":"human overwrite"},"style":{},"expectedRevision":2}
+                                """))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/presentations/" + presentationId + "/ai-edits")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"edits":[
+                                  {"elementId":%d,"expectedRevision":1,"content":{"text":"AI changed first"}},
+                                  {"elementId":%d,"expectedRevision":2,"content":{"text":"AI changed locked"}}
+                                ]}
+                                """.formatted(firstId, secondId)))
+                .andExpect(status().isConflict());
+        assertThat(slideElementRepository.selectById(firstId).getContentJson()).contains("First");
+        assertThat(slideElementRepository.selectById(secondId).getContentJson()).contains("Second");
+
+        mockMvc.perform(post("/api/presentations/" + presentationId + "/ai-edits")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"edits":[{"elementId":%d,"expectedRevision":1,"content":{"text":"stale"}}]}
+                                """.formatted(firstId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].revision").value(2));
+
+        mockMvc.perform(put("/api/elements/" + secondId + "/lock")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedRevision\":2,\"locked\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.revision").value(3));
+
+        mockMvc.perform(post("/api/presentations/" + presentationId + "/ai-edits")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"edits":[{"elementId":%d,"expectedRevision":2,"content":{"text":"stale after lock"}}]}
+                                """.formatted(secondId)))
+                .andExpect(status().isConflict());
     }
 
     private JsonNode createPresentation(String token, String title) throws Exception {

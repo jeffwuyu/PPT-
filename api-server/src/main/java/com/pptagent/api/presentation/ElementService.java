@@ -71,6 +71,7 @@ public class ElementService {
     @Transactional
     public PresentationResponse.ElementResponse updateElement(Long userId, Long elementId, PresentationRequests.UpdateElementRequest request) {
         SlideElementEntity element = accessService.loadElementForEdit(userId, elementId);
+        requireEditableRevision(element, request.expectedRevision());
         elementValidationService.validateElement(userId, request.type(), request.width(), request.height(), request.content());
         element.update(
                 request.type(),
@@ -85,7 +86,9 @@ public class ElementService {
                 jsonService.toJson(jsonService.defaultObject(request.content())),
                 jsonService.toJson(jsonService.defaultObject(request.style()))
         );
-        slideElementRepository.updateById(element);
+        if (slideElementRepository.updateRevisionIfCurrent(elementId, request.expectedRevision(), element) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before editing");
+        }
         if (request.pageOrder() != null) {
             orderService.reorderElementWithTarget(slideElementRepository.findBySlideIdOrderByPageOrderAsc(element.getSlide().getId()), element, request.pageOrder());
         }
@@ -93,13 +96,16 @@ public class ElementService {
     }
 
     @Transactional
-    public void deleteElement(Long userId, Long elementId) {
+    public void deleteElement(Long userId, Long elementId, int expectedRevision) {
         SlideElementEntity element = accessService.loadElementForEdit(userId, elementId);
+        requireEditableRevision(element, expectedRevision);
         List<SlideElementEntity> remaining = slideElementRepository.findBySlideIdOrderByPageOrderAsc(element.getSlide().getId()).stream()
                 .filter(item -> !item.getId().equals(element.getId()))
                 .toList();
         element.markDeleted();
-        slideElementRepository.updateById(element);
+        if (slideElementRepository.updateRevisionIfCurrent(elementId, expectedRevision, element) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before deleting");
+        }
         orderService.normalizeElementOrders(remaining);
     }
 
@@ -121,6 +127,49 @@ public class ElementService {
         }
         orderService.normalizeElementOrders(slideElementRepository.findBySlideIdOrderByPageOrderAsc(slideId));
         return responseMapper.toSlideResponse(slide, true);
+    }
+
+    @Transactional
+    public List<PresentationResponse.ElementResponse> applyAiEdits(Long userId, Long presentationId, List<PresentationRequests.AiElementEdit> edits) {
+        if (edits == null || edits.isEmpty()) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "AI edit command must contain at least one element");
+        }
+        List<SlideElementEntity> targets = edits.stream().map(edit -> accessService.loadElementForEdit(userId, edit.elementId())).toList();
+        if (targets.stream().anyMatch(element -> !element.getSlide().getPresentationId().equals(presentationId))) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "AI edit target does not belong to the requested presentation");
+        }
+        for (int index = 0; index < edits.size(); index++) {
+            PresentationRequests.AiElementEdit edit = edits.get(index);
+            SlideElementEntity element = targets.get(index);
+            if (element.isLocked() || !element.matchesRevision(edit.expectedRevision())) {
+                throw new PlatformException(ErrorCode.CONFLICT, "AI edit target is locked or has a stale revision");
+            }
+        }
+        for (int index = 0; index < edits.size(); index++) {
+            PresentationRequests.AiElementEdit edit = edits.get(index);
+            SlideElementEntity element = targets.get(index);
+            String content = edit.content() == null ? null : jsonService.toJson(edit.content());
+            String style = edit.style() == null ? null : jsonService.toJson(edit.style());
+            element.updateFromAi(content, style, edit.x(), edit.y(), edit.width(), edit.height());
+            if (slideElementRepository.updateRevisionIfCurrent(element.getId(), edit.expectedRevision(), element) != 1) {
+                throw new PlatformException(ErrorCode.CONFLICT, "AI edit target changed during commit");
+            }
+        }
+        return targets.stream().map(element -> responseMapper.toElementResponse(element, true)).toList();
+    }
+
+    @Transactional
+    public PresentationResponse.ElementResponse setLock(Long userId, Long elementId, PresentationRequests.ElementLockRequest request) {
+        SlideElementEntity element = accessService.loadElementForEdit(userId, elementId);
+        if (!element.matchesRevision(request.expectedRevision())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before changing lock");
+        }
+        if (slideElementRepository.updateLockIfCurrent(elementId, request.expectedRevision(), request.locked()) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before changing lock");
+        }
+        element.setLocked(request.locked());
+        element.incrementRevision();
+        return responseMapper.toElementResponse(element, true);
     }
 
     private void addElementFromOperation(Long userId, SlideEntity slide, PresentationRequests.ElementOperation operation) {
@@ -146,6 +195,7 @@ public class ElementService {
 
     private void updateElementFromOperation(Long userId, SlideEntity slide, PresentationRequests.ElementOperation operation) {
         SlideElementEntity element = requireBatchElement(slide, operation.elementId());
+        requireEditableRevision(element, operation.expectedRevision());
         elementValidationService.validateElement(userId, operation.type(), operation.width(), operation.height(), operation.content());
         element.update(
                 operation.type(),
@@ -160,7 +210,9 @@ public class ElementService {
                 jsonService.toJson(jsonService.defaultObject(operation.content())),
                 jsonService.toJson(jsonService.defaultObject(operation.style()))
         );
-        slideElementRepository.updateById(element);
+        if (slideElementRepository.updateRevisionIfCurrent(element.getId(), operation.expectedRevision(), element) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before editing");
+        }
         if (operation.pageOrder() != null) {
             orderService.reorderElementWithTarget(slideElementRepository.findBySlideIdOrderByPageOrderAsc(slide.getId()), element, operation.pageOrder());
         }
@@ -168,8 +220,11 @@ public class ElementService {
 
     private void deleteElementFromOperation(SlideEntity slide, PresentationRequests.ElementOperation operation) {
         SlideElementEntity element = requireBatchElement(slide, operation.elementId());
+        requireEditableRevision(element, operation.expectedRevision());
         element.markDeleted();
-        slideElementRepository.updateById(element);
+        if (slideElementRepository.updateRevisionIfCurrent(element.getId(), operation.expectedRevision(), element) != 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before deleting");
+        }
     }
 
     private void reorderElementFromOperation(SlideEntity slide, PresentationRequests.ElementOperation operation) {
@@ -177,6 +232,7 @@ public class ElementService {
         if (operation.pageOrder() == null) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "pageOrder is required for reorder");
         }
+        requireEditableRevision(element, operation.expectedRevision());
         orderService.reorderElementWithTarget(slideElementRepository.findBySlideIdOrderByPageOrderAsc(slide.getId()), element, operation.pageOrder());
     }
 
@@ -194,5 +250,14 @@ public class ElementService {
             throw new PlatformException(ErrorCode.FORBIDDEN, "Element does not belong to slide");
         }
         return element;
+    }
+
+    private void requireEditableRevision(SlideElementEntity element, Integer expectedRevision) {
+        if (element.isLocked()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element is protected by a human edit lock");
+        }
+        if (expectedRevision == null || !element.matchesRevision(expectedRevision)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before editing");
+        }
     }
 }

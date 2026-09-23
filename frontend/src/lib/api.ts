@@ -171,13 +171,17 @@ export function updateElement(element: SlideElement) {
       pageOrder: element.pageOrder,
       initiallyPresent: element.initiallyPresent,
       content: element.content || {},
-      style: element.style || {}
+      style: element.style || {},
+      expectedRevision: element.revision
     })
   });
 }
 
-export function deleteElement(elementId: number) {
-  return apiRequest<void>(`/elements/${elementId}`, { method: 'DELETE' });
+export function deleteElement(element: SlideElement) {
+  return apiRequest<void>(`/elements/${element.id}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ expectedRevision: element.revision })
+  });
 }
 
 export function deleteSlide(slideId: number) {
