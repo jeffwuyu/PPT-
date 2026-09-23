@@ -102,9 +102,10 @@ public class AgentGenerationService {
     @Transactional
     public GenerationJobResponse pause(Long ownerUserId, Long generationJobId) {
         AgentGenerationJobEntity job = owned(ownerUserId, generationJobId);
-        if ("PAUSED".equals(job.getStatus())) return response(job);
-        requireQueued(job, "Only queued generations can be paused safely");
-        updateStatus(job, "QUEUED", "PAUSED");
+        if ("PAUSED".equals(job.getStatus()) || "PAUSING".equals(job.getStatus())) return response(job);
+        if ("QUEUED".equals(job.getStatus())) updateStatus(job, "QUEUED", "PAUSED");
+        else if ("RUNNING".equals(job.getStatus())) updateStatus(job, "RUNNING", "PAUSING");
+        else throw new PlatformException(ErrorCode.CONFLICT, "Generation cannot be paused in its current state");
         return get(ownerUserId, generationJobId);
     }
 
@@ -112,8 +113,14 @@ public class AgentGenerationService {
     public GenerationJobResponse cancel(Long ownerUserId, Long generationJobId) {
         AgentGenerationJobEntity job = owned(ownerUserId, generationJobId);
         if ("CANCELLED".equals(job.getStatus())) return response(job);
-        requireQueued(job, "Running generations cannot be cancelled until page execution supports fencing");
-        updateStatus(job, job.getStatus(), "CANCELLED");
+        if ("QUEUED".equals(job.getStatus())) {
+            updateStatus(job, "QUEUED", "CANCELLED");
+            pageTasks.cancelPending(job.getId(), Instant.now());
+        } else if ("RUNNING".equals(job.getStatus()) || "PAUSING".equals(job.getStatus())) {
+            updateStatus(job, job.getStatus(), "CANCELLING");
+        } else {
+            throw new PlatformException(ErrorCode.CONFLICT, "Generation cannot be cancelled in its current state");
+        }
         return get(ownerUserId, generationJobId);
     }
 
@@ -140,12 +147,6 @@ public class AgentGenerationService {
     private AgentGenerationJobEntity owned(Long ownerUserId, Long id) {
         return generationJobs.findByOwnerAndId(ownerUserId, id)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Generation job not found"));
-    }
-
-    private void requireQueued(AgentGenerationJobEntity job, String message) {
-        if (!"QUEUED".equals(job.getStatus())) {
-            throw new PlatformException(ErrorCode.CONFLICT, message);
-        }
     }
 
     private void updateStatus(AgentGenerationJobEntity job, String expected, String next) {

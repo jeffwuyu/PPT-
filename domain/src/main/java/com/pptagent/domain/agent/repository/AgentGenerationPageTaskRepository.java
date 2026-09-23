@@ -44,4 +44,12 @@ public interface AgentGenerationPageTaskRepository extends BaseMapper<AgentGener
                 .set("lease_expires_at", null)
                 .set("updated_at", now));
     }
+
+    default int cancelPending(Long generationJobId, Instant now) {
+        return update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
+                .eq("generation_job_id", generationJobId).eq("status", "PENDING")
+                .set("status", "CANCELLED")
+                .set("failure_reason", "Generation cancelled before page execution")
+                .set("updated_at", now));
+    }
 }

@@ -40,6 +40,21 @@ public class AgentGenerationWorker {
     public void execute(Long generationJobId, Long ownerUserId, Long agentJobId) {
         if (!ensureRunning(generationJobId, ownerUserId)) return;
         for (AgentGenerationPageTaskEntity page : pageTasks.findByGenerationJobId(generationJobId)) {
+            AgentGenerationJobEntity control = generationJobs.selectById(generationJobId);
+            if (control == null) return;
+            if ("PAUSING".equals(control.getStatus())) {
+                if (control.getCompletedPages() == control.getTotalPages()) {
+                    completeGenerationIfOwned(control);
+                } else {
+                    setGenerationStatus(control.getId(), control.getOwnerUserId(), "PAUSING", "PAUSED");
+                }
+                return;
+            }
+            if ("CANCELLING".equals(control.getStatus())) {
+                pageTasks.cancelPending(generationJobId, Instant.now());
+                setGenerationStatus(control.getId(), control.getOwnerUserId(), "CANCELLING", "CANCELLED");
+                return;
+            }
             String leaseToken = UUID.randomUUID().toString();
             if (pageTasks.claimPage(page.getId(), leaseToken, Instant.now().plus(Duration.ofSeconds(30))) != 1) continue;
             try {
@@ -69,6 +84,23 @@ public class AgentGenerationWorker {
         }
     }
 
+    private void completeGenerationIfOwned(AgentGenerationJobEntity job) {
+        try {
+            agentJobService.completeGeneration(job.getOwnerUserId(), job.getAgentJobId(), job.getId());
+            finish(job.getId(), job.getOwnerUserId(), "SUCCEEDED", null);
+        } catch (RuntimeException exception) {
+            finish(job.getId(), job.getOwnerUserId(), "FAILED", exception.getMessage());
+        }
+    }
+
+    @Transactional
+    void setGenerationStatus(Long id, Long owner, String expected, String next) {
+        generationJobs.update(null, new UpdateWrapper<AgentGenerationJobEntity>()
+                .eq("id", id).eq("owner_user_id", owner).eq("status", expected)
+                .set("status", next).setSql("revision = revision + 1")
+                .set("updated_at", Instant.now()));
+    }
+
     /** Durable queue pump; the conditional QUEUED->RUNNING transition is
      * safe when more than one application instance polls the same database. */
     @Scheduled(fixedDelayString = "${ppt.agent.generation.dispatch-interval-ms:250}")
@@ -88,7 +120,9 @@ public class AgentGenerationWorker {
         for (AgentGenerationPageTaskEntity page : pageTasks.findExpiredLeases(50)) {
             if (pageTasks.requeueExpired(page.getId(), now) != 1) continue;
             AgentGenerationJobEntity generation = generationJobs.selectById(page.getGenerationJobId());
-            if (generation == null || !"RUNNING".equals(generation.getStatus())) continue;
+            if (generation == null || !("RUNNING".equals(generation.getStatus())
+                    || "PAUSING".equals(generation.getStatus())
+                    || "CANCELLING".equals(generation.getStatus()))) continue;
             try {
                 taskExecutor.execute(() -> execute(generation.getId(), generation.getOwnerUserId(), generation.getAgentJobId()));
             } catch (RejectedExecutionException ignored) {
@@ -105,7 +139,10 @@ public class AgentGenerationWorker {
                 .set("updated_at", Instant.now()));
         if (updated == 1) return true;
         AgentGenerationJobEntity current = generationJobs.selectById(id);
-        return current != null && owner.equals(current.getOwnerUserId()) && "RUNNING".equals(current.getStatus());
+        return current != null && owner.equals(current.getOwnerUserId())
+                && ("RUNNING".equals(current.getStatus())
+                || "PAUSING".equals(current.getStatus())
+                || "CANCELLING".equals(current.getStatus()));
     }
 
     @Transactional
