@@ -1,7 +1,7 @@
 # PPT Agent 基线记录
 
 - GitHub 基准提交：`93577d20af800cef5e2d335c6445f2a8feb186ea`
-- 当前实现提交：`01899dd`（P01 解析任务、Markdown/PDF/DOCX/TXT block 分类与结构化定位、P04 逐页异步执行/租约/控制排空、P05 游标过期信号与数据库轮询补发；基线提交仍为 `93577d20af800cef5e2d335c6445f2a8feb186ea`）
+- 当前实现提交：`d4e5d26`（P01 解析任务、Markdown/PDF/DOCX/TXT block 分类与结构化定位、失败清理、P04 逐页异步执行/租约/控制排空、P05 游标过期信号与数据库轮询补发；基线提交仍为 `93577d20af800cef5e2d335c6445f2a8feb186ea`）
 - 当前工作区改动数：9（主要为文档、评测入口和本次实现）
 - Java：21
 - Spring AI：1.1.4
