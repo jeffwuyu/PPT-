@@ -1,0 +1,32 @@
+{
+  "caseId": "P04-CONCURRENCY-01",
+  "status": "PASS",
+  "commit": "79bf2d0",
+  "environment": {
+    "javaVersion": "21.0.9",
+    "database": "H2 2.3",
+    "providerMode": "mock",
+    "profile": "test"
+  },
+  "startedAt": "2026-09-23T17:16:23+08:00",
+  "finishedAt": "2026-09-23T17:16:56+08:00",
+  "expected": {
+    "workerCount": 4,
+    "maxPoolSize": 4,
+    "queueCapacity": 100
+  },
+  "actual": {
+    "testClass": "com.pptagent.api.agent.AgentIntegrationTests",
+    "testsRun": 13,
+    "failures": 0,
+    "errors": 0,
+    "workerCount": 4,
+    "maxPoolSize": 4,
+    "queueRemainingCapacity": 100
+  },
+  "artifacts": ["command.txt", "logs/maven-test.log"],
+  "limitations": [
+    "This is a per-instance bounded executor; it does not prove a cluster-wide model concurrency limit.",
+    "The test uses mocked providers and does not measure throughput or provider quotas."
+  ]
+}
