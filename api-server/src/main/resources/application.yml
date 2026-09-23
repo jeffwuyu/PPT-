@@ -59,6 +59,8 @@ ppt:
     generation:
       worker-count: ${PPT_AGENT_GENERATION_WORKER_COUNT:4}
       queue-capacity: ${PPT_AGENT_GENERATION_QUEUE_CAPACITY:100}
+      dispatch-interval-ms: ${PPT_AGENT_GENERATION_DISPATCH_INTERVAL_MS:250}
+      lease-scan-interval-ms: ${PPT_AGENT_GENERATION_LEASE_SCAN_INTERVAL_MS:1000}
     max-plan-slides: 20
     default-checkpoint-max-iterations: ${PPT_AGENT_CHECKPOINT_MAX_ITERATIONS:5}
     memory-compression-threshold-chars: ${PPT_AGENT_MEMORY_COMPRESSION_THRESHOLD_CHARS:1600}

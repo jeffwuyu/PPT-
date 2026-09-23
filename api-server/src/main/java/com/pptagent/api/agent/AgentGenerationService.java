@@ -26,6 +26,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.ArrayList;
 import java.util.List;
 import java.time.Instant;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 public class AgentGenerationService {
@@ -81,7 +82,11 @@ public class AgentGenerationService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                worker.execute(generationId, ownerUserId, agentJobId);
+                try {
+                    worker.execute(generationId, ownerUserId, agentJobId);
+                } catch (RejectedExecutionException ignored) {
+                    // The scheduled durable dispatcher will retry this QUEUED row.
+                }
             }
         });
         return response(generation);
@@ -122,7 +127,11 @@ public class AgentGenerationService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                worker.execute(job.getId(), ownerUserId, job.getAgentJobId());
+                try {
+                    worker.execute(job.getId(), ownerUserId, job.getAgentJobId());
+                } catch (RejectedExecutionException ignored) {
+                    // The scheduled durable dispatcher will retry this QUEUED row.
+                }
             }
         });
         return get(ownerUserId, generationJobId);

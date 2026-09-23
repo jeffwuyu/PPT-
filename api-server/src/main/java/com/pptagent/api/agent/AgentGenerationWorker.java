@@ -9,42 +9,51 @@ import com.pptagent.domain.agent.AgentJobStatus;
 import com.pptagent.domain.agent.repository.AgentGenerationJobRepository;
 import com.pptagent.domain.agent.repository.AgentGenerationPageTaskRepository;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.UUID;
+import java.time.Duration;
 
 @Service
 public class AgentGenerationWorker {
     private final AgentGenerationJobRepository generationJobs;
     private final AgentGenerationPageTaskRepository pageTasks;
     private final AgentJobService agentJobService;
+    private final TaskExecutor taskExecutor;
 
     public AgentGenerationWorker(AgentGenerationJobRepository generationJobs,
                                  AgentGenerationPageTaskRepository pageTasks,
-                                 AgentJobService agentJobService) {
+                                 AgentJobService agentJobService,
+                                 TaskExecutor taskExecutor) {
         this.generationJobs = generationJobs;
         this.pageTasks = pageTasks;
         this.agentJobService = agentJobService;
+        this.taskExecutor = taskExecutor;
     }
 
     @Async
     public void execute(Long generationJobId, Long ownerUserId, Long agentJobId) {
-        if (transition(generationJobId, ownerUserId, "QUEUED", "RUNNING") != 1) return;
+        if (!ensureRunning(generationJobId, ownerUserId)) return;
         for (AgentGenerationPageTaskEntity page : pageTasks.findByGenerationJobId(generationJobId)) {
-            if (transitionPage(page.getId(), "PENDING", "RUNNING") != 1) continue;
+            String leaseToken = UUID.randomUUID().toString();
+            if (pageTasks.claimPage(page.getId(), leaseToken, Instant.now().plus(Duration.ofSeconds(30))) != 1) continue;
             try {
                 AgentResponse result = agentJobService.executeGenerationPage(
                         ownerUserId, agentJobId, generationJobId, page.getPageOrder() + 1);
                 if (result.status() == AgentJobStatus.FAILED) {
-                    completePage(page.getId(), "FAILED", result.failureReason());
+                    completePage(page.getId(), leaseToken, "FAILED", result.failureReason());
                     finish(generationJobId, ownerUserId, "FAILED", result.failureReason());
                     return;
                 }
-                completePage(page.getId(), "SUCCEEDED", null);
+                completePage(page.getId(), leaseToken, "SUCCEEDED", null);
                 incrementCompleted(generationJobId, ownerUserId);
             } catch (RuntimeException exception) {
-                completePage(page.getId(), "FAILED", exception.getMessage());
+                completePage(page.getId(), leaseToken, "FAILED", exception.getMessage());
                 finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
                 return;
             }
@@ -58,6 +67,45 @@ public class AgentGenerationWorker {
                 finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
             }
         }
+    }
+
+    /** Durable queue pump; the conditional QUEUED->RUNNING transition is
+     * safe when more than one application instance polls the same database. */
+    @Scheduled(fixedDelayString = "${ppt.agent.generation.dispatch-interval-ms:250}")
+    public void dispatchQueued() {
+        for (AgentGenerationJobEntity job : generationJobs.findQueued(20)) {
+            try {
+                taskExecutor.execute(() -> execute(job.getId(), job.getOwnerUserId(), job.getAgentJobId()));
+            } catch (RejectedExecutionException ignored) {
+                return;
+            }
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${ppt.agent.generation.lease-scan-interval-ms:1000}")
+    public void recoverExpiredPages() {
+        Instant now = Instant.now();
+        for (AgentGenerationPageTaskEntity page : pageTasks.findExpiredLeases(50)) {
+            if (pageTasks.requeueExpired(page.getId(), now) != 1) continue;
+            AgentGenerationJobEntity generation = generationJobs.selectById(page.getGenerationJobId());
+            if (generation == null || !"RUNNING".equals(generation.getStatus())) continue;
+            try {
+                taskExecutor.execute(() -> execute(generation.getId(), generation.getOwnerUserId(), generation.getAgentJobId()));
+            } catch (RejectedExecutionException ignored) {
+                return;
+            }
+        }
+    }
+
+    @Transactional
+    boolean ensureRunning(Long id, Long owner) {
+        int updated = generationJobs.update(null, new UpdateWrapper<AgentGenerationJobEntity>()
+                .eq("id", id).eq("owner_user_id", owner).eq("status", "QUEUED")
+                .set("status", "RUNNING").setSql("revision = revision + 1")
+                .set("updated_at", Instant.now()));
+        if (updated == 1) return true;
+        AgentGenerationJobEntity current = generationJobs.selectById(id);
+        return current != null && owner.equals(current.getOwnerUserId()) && "RUNNING".equals(current.getStatus());
     }
 
     @Transactional
@@ -78,16 +126,10 @@ public class AgentGenerationWorker {
     }
 
     @Transactional
-    int transitionPage(Long id, String expected, String next) {
-        return pageTasks.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
-                .eq("id", id).eq("status", expected).set("status", next)
-                .setSql("attempts = attempts + 1").set("updated_at", Instant.now()));
-    }
-
-    @Transactional
-    void completePage(Long id, String status, String failureReason) {
+    void completePage(Long id, String leaseToken, String status, String failureReason) {
         pageTasks.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
-                .eq("id", id).eq("status", "RUNNING").set("status", status)
+                .eq("id", id).eq("status", "RUNNING").eq("lease_token", leaseToken).set("status", status)
+                .set("lease_token", null).set("lease_expires_at", null)
                 .set("failure_reason", failureReason).set("updated_at", Instant.now()));
     }
 
