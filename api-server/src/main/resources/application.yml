@@ -74,6 +74,8 @@ ppt:
     image-model: ${PPT_AGENT_BAILIAN_IMAGE_MODEL:qwen-image-2.0-pro}
     image-size: ${PPT_AGENT_BAILIAN_IMAGE_SIZE:2688*1536}
     request-timeout-seconds: ${PPT_AGENT_BAILIAN_REQUEST_TIMEOUT_SECONDS:60}
+  events:
+    relay-interval-ms: ${PPT_AGENT_EVENTS_RELAY_INTERVAL_MS:250}
   jwt:
     issuer: ppt-agent-platform
     secret: ${PPT_JWT_SECRET:change-me-change-me-change-me-change-me}
