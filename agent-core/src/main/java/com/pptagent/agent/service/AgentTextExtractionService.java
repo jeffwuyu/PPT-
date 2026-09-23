@@ -52,6 +52,8 @@ public class AgentTextExtractionService {
             blocks = extractDocxBlocks(bytes);
         } else if ("pdf".equals(extension) || contentType.contains("pdf")) {
             blocks = extractPdfBlocks(bytes);
+        } else if ("md".equals(extension) || contentType.contains("markdown")) {
+            blocks = extractMarkdownBlocks(new String(bytes, StandardCharsets.UTF_8));
         } else {
             blocks = extractPlainTextBlocks(new String(bytes, StandardCharsets.UTF_8));
         }
@@ -139,6 +141,62 @@ public class AgentTextExtractionService {
                     java.util.Map.of("lineStart", start, "lineEnd", lines.length)));
         }
         return blocks;
+    }
+
+    private List<SourceBlock> extractMarkdownBlocks(String text) {
+        String normalized = text == null ? "" : text.replace("\u0000", "").trim();
+        if (normalized.isBlank()) return List.of();
+        String[] lines = normalized.split("\\R", -1);
+        List<SourceBlock> blocks = new ArrayList<>();
+        StringBuilder paragraph = new StringBuilder();
+        int paragraphStart = 1;
+        for (int index = 0; index < lines.length; index++) {
+            String line = lines[index].trim();
+            int lineNumber = index + 1;
+            if (line.isBlank()) {
+                flushMarkdownParagraph(blocks, paragraph, paragraphStart, lineNumber - 1);
+                paragraphStart = lineNumber + 1;
+                continue;
+            }
+            if (line.startsWith("#")) {
+                flushMarkdownParagraph(blocks, paragraph, paragraphStart, lineNumber - 1);
+                String title = line.replaceFirst("^#+\\s*", "").trim();
+                if (!title.isBlank()) {
+                    blocks.add(new SourceBlock("title-" + lineNumber, "title", title,
+                            java.util.Map.of("lineStart", lineNumber, "lineEnd", lineNumber)));
+                }
+                paragraphStart = lineNumber + 1;
+            } else if (line.startsWith("- ") || line.startsWith("* ")) {
+                flushMarkdownParagraph(blocks, paragraph, paragraphStart, lineNumber - 1);
+                List<String> items = new ArrayList<>();
+                int end = lineNumber;
+                int cursor = index;
+                while (cursor < lines.length) {
+                    String item = lines[cursor].trim();
+                    if (!(item.startsWith("- ") || item.startsWith("* "))) break;
+                    items.add(item.substring(2).trim());
+                    end = cursor + 1;
+                    cursor++;
+                }
+                blocks.add(new SourceBlock("list-" + lineNumber + "-" + end, "list",
+                        String.join("\n", items), java.util.Map.of("lineStart", lineNumber, "lineEnd", end)));
+                index = cursor - 1;
+                paragraphStart = end + 1;
+            } else {
+                if (paragraph.isEmpty()) paragraphStart = lineNumber;
+                if (!paragraph.isEmpty()) paragraph.append('\n');
+                paragraph.append(line);
+            }
+        }
+        flushMarkdownParagraph(blocks, paragraph, paragraphStart, lines.length);
+        return blocks;
+    }
+
+    private void flushMarkdownParagraph(List<SourceBlock> blocks, StringBuilder paragraph, int start, int end) {
+        if (paragraph.isEmpty()) return;
+        blocks.add(new SourceBlock("paragraph-" + start + "-" + end, "paragraph", paragraph.toString().trim(),
+                java.util.Map.of("lineStart", start, "lineEnd", end)));
+        paragraph.setLength(0);
     }
 
     private String sha256(byte[] bytes) {
