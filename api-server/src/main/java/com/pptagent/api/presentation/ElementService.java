@@ -253,9 +253,6 @@ public class ElementService {
     }
 
     private void requireEditableRevision(SlideElementEntity element, Integer expectedRevision) {
-        if (element.isLocked()) {
-            throw new PlatformException(ErrorCode.CONFLICT, "Element is protected by a human edit lock");
-        }
         if (expectedRevision == null || !element.matchesRevision(expectedRevision)) {
             throw new PlatformException(ErrorCode.CONFLICT, "Element revision changed; reload before editing");
         }
