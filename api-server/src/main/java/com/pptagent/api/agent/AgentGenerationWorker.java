@@ -18,28 +18,37 @@ import java.time.Instant;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.UUID;
 import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AgentGenerationWorker {
+    private final Map<Long, String> locallyOwnedPageLeases = new ConcurrentHashMap<>();
     private final AgentGenerationJobRepository generationJobs;
     private final AgentGenerationPageTaskRepository pageTasks;
     private final AgentJobService agentJobService;
     private final TaskExecutor taskExecutor;
+    private final AgentGenerationPageLifecycleService pageLifecycle;
+    private final GenerationConcurrencyService concurrency;
 
     public AgentGenerationWorker(AgentGenerationJobRepository generationJobs,
                                  AgentGenerationPageTaskRepository pageTasks,
                                  AgentJobService agentJobService,
-                                 TaskExecutor taskExecutor) {
+                                 TaskExecutor taskExecutor,
+                                 AgentGenerationPageLifecycleService pageLifecycle,
+                                 GenerationConcurrencyService concurrency) {
         this.generationJobs = generationJobs;
         this.pageTasks = pageTasks;
         this.agentJobService = agentJobService;
         this.taskExecutor = taskExecutor;
+        this.pageLifecycle = pageLifecycle;
+        this.concurrency = concurrency;
     }
 
     @Async
     public void execute(Long generationJobId, Long ownerUserId, Long agentJobId) {
         if (!ensureRunning(generationJobId, ownerUserId)) return;
-        for (AgentGenerationPageTaskEntity page : pageTasks.findByGenerationJobId(generationJobId)) {
+        for (AgentGenerationPageTaskEntity page : pageTasks.findClaimableByGenerationJobId(generationJobId)) {
             AgentGenerationJobEntity control = generationJobs.selectById(generationJobId);
             if (control == null) return;
             if ("PAUSING".equals(control.getStatus())) {
@@ -57,27 +66,39 @@ public class AgentGenerationWorker {
             }
             String leaseToken = UUID.randomUUID().toString();
             if (pageTasks.claimPage(page.getId(), leaseToken, Instant.now().plus(Duration.ofSeconds(30))) != 1) continue;
+            locallyOwnedPageLeases.put(page.getId(), leaseToken);
+            String modelSlot = concurrency.tryAcquire(4, 60);
+            if (modelSlot == null) {
+                pageTasks.releaseClaim(page.getId(), leaseToken, Instant.now());
+                continue;
+            }
             try {
                 AgentResponse result = agentJobService.executeGenerationPage(
                         ownerUserId, agentJobId, generationJobId, page.getPageOrder() + 1);
                 if (result.status() == AgentJobStatus.FAILED) {
-                    completePage(page.getId(), leaseToken, "FAILED", result.failureReason());
-                    finish(generationJobId, ownerUserId, "FAILED", result.failureReason());
-                    return;
+                    pageLifecycle.failOrRetry(page.getId(), generationJobId, leaseToken, result.failureReason());
+                    continue;
                 }
-                completePage(page.getId(), leaseToken, "SUCCEEDED", null);
-                incrementCompleted(generationJobId, ownerUserId);
+                pageLifecycle.complete(page.getId(), generationJobId, leaseToken);
             } catch (RuntimeException exception) {
-                completePage(page.getId(), leaseToken, "FAILED", exception.getMessage());
-                finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
-                return;
+                pageLifecycle.failOrRetry(page.getId(), generationJobId, leaseToken, exception.getMessage());
+            } finally {
+                concurrency.release(modelSlot);
+                locallyOwnedPageLeases.remove(page.getId(), leaseToken);
             }
         }
         AgentGenerationJobEntity current = generationJobs.selectById(generationJobId);
-        if (current != null && current.getCompletedPages() == current.getTotalPages()) {
+        if (current != null && pageTasks.findByGenerationJobId(generationJobId).stream()
+                .noneMatch(page -> "PENDING".equals(page.getStatus()) || "RUNNING".equals(page.getStatus()))) {
             try {
-                agentJobService.completeGeneration(ownerUserId, agentJobId, generationJobId);
-                finish(generationJobId, ownerUserId, "SUCCEEDED", null);
+                boolean anySucceeded = pageTasks.findByGenerationJobId(generationJobId).stream()
+                        .anyMatch(page -> "SUCCEEDED".equals(page.getStatus()));
+                boolean anyFailed = pageTasks.findByGenerationJobId(generationJobId).stream()
+                        .anyMatch(page -> "FAILED".equals(page.getStatus()));
+                if (anySucceeded) agentJobService.completeGeneration(ownerUserId, agentJobId, generationJobId);
+                finish(generationJobId, ownerUserId,
+                        anyFailed && anySucceeded ? "PARTIAL_FAILED" : anyFailed ? "FAILED" : "SUCCEEDED",
+                        anyFailed ? "One or more pages exhausted their retry budget" : null);
             } catch (RuntimeException exception) {
                 finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
             }
@@ -117,6 +138,7 @@ public class AgentGenerationWorker {
     @Scheduled(fixedDelayString = "${ppt.agent.generation.lease-scan-interval-ms:1000}")
     public void recoverExpiredPages() {
         Instant now = Instant.now();
+        pageTasks.failExpiredExhausted(now);
         for (AgentGenerationPageTaskEntity page : pageTasks.findExpiredLeases(50)) {
             if (pageTasks.requeueExpired(page.getId(), now) != 1) continue;
             AgentGenerationJobEntity generation = generationJobs.selectById(page.getGenerationJobId());
@@ -129,6 +151,13 @@ public class AgentGenerationWorker {
                 return;
             }
         }
+    }
+
+    @Scheduled(fixedDelayString = "${ppt.agent.generation.lease-renew-interval-ms:10000}")
+    public void renewOwnedPages() {
+        Instant now = Instant.now();
+        locallyOwnedPageLeases.forEach((pageId, token) ->
+                pageTasks.renewClaim(pageId, token, now.plus(Duration.ofSeconds(30)), now));
     }
 
     @Transactional

@@ -2,6 +2,7 @@ package com.pptagent.api.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pptagent.agent.service.AgentTextExtractionService;
+import com.pptagent.agent.service.OcrClient;
 import com.pptagent.api.agent.dto.SourceParseRequest;
 import com.pptagent.api.agent.dto.SourceParseResponse;
 import com.pptagent.common.error.ErrorCode;
@@ -21,6 +22,11 @@ import com.pptagent.domain.file.FileType;
 import com.pptagent.domain.file.repository.FileAssetRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +40,8 @@ public class SourceParseService {
     private final AgentSourceRepository sources;
     private final AgentTextExtractionService extraction;
     private final ObjectMapper objectMapper;
+    private final TaskExecutor taskExecutor;
+    private final OcrClient ocrClient;
 
     public SourceParseService(FileAssetRepository files,
                               AgentJobRepository jobs,
@@ -41,7 +49,9 @@ public class SourceParseService {
                               AgentSourceBlockRepository blocks,
                               AgentSourceRepository sources,
                               AgentTextExtractionService extraction,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              @Qualifier("taskExecutor") TaskExecutor taskExecutor,
+                              OcrClient ocrClient) {
         this.files = files;
         this.jobs = jobs;
         this.parseJobs = parseJobs;
@@ -49,6 +59,8 @@ public class SourceParseService {
         this.sources = sources;
         this.extraction = extraction;
         this.objectMapper = objectMapper;
+        this.taskExecutor = taskExecutor;
+        this.ocrClient = ocrClient;
     }
 
     @Transactional
@@ -67,6 +79,12 @@ public class SourceParseService {
         if (file.getFileType() != FileType.SOURCE_TEXT) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "Only SOURCE_TEXT files can be parsed");
         }
+        if (file.getByteSize() > 20L * 1024 * 1024) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "FILE_TOO_LARGE");
+        }
+        if (!supportedType(file.getOriginalFilename(), file.getContentType())) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "UNSUPPORTED_FORMAT");
+        }
         AgentJobEntity agentJob = null;
         if (request.agentJobId() != null) {
             agentJob = jobs.findByIdAndOwner(request.agentJobId(), userId)
@@ -76,8 +94,52 @@ public class SourceParseService {
         AgentParseJobEntity parseJob = new AgentParseJobEntity(userId, file.getId(),
                 agentJob == null ? null : agentJob.getId(), request.idempotencyKey());
         parseJobs.insert(parseJob);
+        Long parseJobId = parseJob.getId();
+        Runnable dispatch = () -> taskExecutor.execute(() -> process(parseJobId));
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { dispatch.run(); }
+            });
+        } else {
+            dispatch.run();
+        }
+        return response(parseJob);
+    }
+
+    @Transactional
+    public void process(Long parseJobId) {
+        AgentParseJobEntity parseJob = parseJobs.selectById(parseJobId);
+        if (parseJob == null || !("QUEUED".equals(parseJob.getStatus()) || "RUNNING".equals(parseJob.getStatus()))) return;
+        parseJob.markRunning();
+        parseJobs.updateById(parseJob);
+        FileAssetEntity file = files.findWithOwnerById(parseJob.getFileAssetId()).orElse(null);
+        if (file == null) {
+            parseJob.fail("SOURCE_FILE_NOT_FOUND");
+            parseJobs.updateById(parseJob);
+            return;
+        }
+        AgentJobEntity agentJob = parseJob.getAgentJobId() == null ? null
+                : jobs.findByIdAndOwner(parseJob.getAgentJobId(), parseJob.getOwnerUserId()).orElse(null);
         try {
-            AgentTextExtractionService.ExtractedDocument document = extraction.extractStructured(file);
+            AgentTextExtractionService.ExtractedDocument document;
+            try {
+                document = extraction.extractStructured(file);
+            } catch (PlatformException exception) {
+                if (!"OCR_REQUIRED".equals(exception.getMessage())) throw exception;
+                parseJob.markOcrRequired();
+                parseJobs.updateById(parseJob);
+                parseJob.markOcrRunning();
+                parseJobs.updateById(parseJob);
+                var ocr = ocrClient.recognize(extraction.loadSourceBytes(file), file.getOriginalFilename());
+                List<AgentTextExtractionService.SourceBlock> ocrBlocks = ocr.pages().stream()
+                        .filter(page -> page.text() != null && !page.text().isBlank())
+                        .map(page -> new AgentTextExtractionService.SourceBlock("page-" + page.page(), "paragraph", page.text(),
+                                Map.of("page", page.page(), "ocrProvider", ocr.provider(), "ocrModel", ocr.model(),
+                                        "requestId", ocr.requestId(), "confidence", page.confidence())))
+                        .toList();
+                if (ocrBlocks.isEmpty()) throw new PlatformException(ErrorCode.BAD_REQUEST, "EMPTY_DOCUMENT");
+                document = new AgentTextExtractionService.ExtractedDocument("ocr", "ocr-v1", ocrBlocks, List.of());
+            }
             for (AgentTextExtractionService.SourceBlock block : document.blocks()) {
                 blocks.insert(new AgentSourceBlockEntity(parseJob.getId(), block.blockId(), block.type(), block.text(),
                         writeJson(block.locator())));
@@ -104,7 +166,6 @@ public class SourceParseService {
             parseJob.fail("DOCUMENT_CORRUPTED");
         }
         parseJobs.updateById(parseJob);
-        return response(parseJob);
     }
 
     @Transactional(readOnly = true)
@@ -130,5 +191,12 @@ public class SourceParseService {
         } catch (Exception exception) {
             throw new IllegalStateException("Could not serialize source metadata", exception);
         }
+    }
+
+    private boolean supportedType(String filename, String contentType) {
+        String name = filename == null ? "" : filename.toLowerCase(java.util.Locale.ROOT);
+        String type = contentType == null ? "" : contentType.toLowerCase(java.util.Locale.ROOT);
+        return name.endsWith(".pdf") || name.endsWith(".docx") || name.endsWith(".md") || name.endsWith(".txt")
+                || type.contains("pdf") || type.contains("wordprocessingml") || type.contains("markdown") || type.startsWith("text/");
     }
 }

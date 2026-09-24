@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -59,11 +60,11 @@ public class AgentController {
     }
 
     @PostMapping("/sources/parse")
-    public ApiResponse<SourceParseResponse> parseSource(
+    public ResponseEntity<ApiResponse<SourceParseResponse>> parseSource(
             @AuthenticationPrincipal AuthenticatedUser user,
             @Valid @RequestBody SourceParseRequest request
     ) {
-        return ApiResponse.ok(sourceParseService.submit(user.id(), request));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok(sourceParseService.submit(user.id(), request)));
     }
 
     @GetMapping("/sources/parse-jobs/{parseJobId}")
@@ -96,11 +97,13 @@ public class AgentController {
             @PathVariable Long id,
             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId
     ) {
+        long watermark = progressStreamService.currentWatermark();
         Object snapshot = progressSnapshotService.snapshot(user.id(), id);
         SseEmitter emitter = progressStreamService.subscribe(id);
-        progressStreamService.sendSnapshot(emitter, snapshot);
+        progressStreamService.sendSnapshot(emitter, java.util.Map.of("watermark", watermark, "state", snapshot));
         try {
-            for (var event : progressStreamService.replayAfter(id, lastEventId)) {
+            String cursor = lastEventId == null || lastEventId.isBlank() ? String.valueOf(watermark) : lastEventId;
+            for (var event : progressStreamService.replayAfter(id, cursor)) {
                 progressStreamService.sendReplay(emitter, event);
             }
         } catch (CursorExpiredException exception) {

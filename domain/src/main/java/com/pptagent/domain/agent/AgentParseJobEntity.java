@@ -29,7 +29,7 @@ public class AgentParseJobEntity {
         this.fileAssetId = fileAssetId;
         this.agentJobId = agentJobId;
         this.idempotencyKey = idempotencyKey;
-        this.status = "RUNNING";
+        this.status = "QUEUED";
         this.revision = 1;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
@@ -55,6 +55,24 @@ public class AgentParseJobEntity {
         this.parserVersion = parserVersion;
         this.totalBlocks = totalBlocks;
         this.failureReason = null;
+        this.revision++;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markRunning() {
+        this.status = "RUNNING";
+        this.revision++;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markOcrRequired() {
+        this.status = "OCR_REQUIRED";
+        this.revision++;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markOcrRunning() {
+        this.status = "OCR_RUNNING";
         this.revision++;
         this.updatedAt = Instant.now();
     }

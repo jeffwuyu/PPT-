@@ -17,6 +17,7 @@ public class AgentGenerationPageTaskEntity {
     private String failureReason;
     private String leaseToken;
     private Instant leaseExpiresAt;
+    private Instant nextAttemptAt;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -41,4 +42,5 @@ public class AgentGenerationPageTaskEntity {
     public String getFailureReason() { return failureReason; }
     public String getLeaseToken() { return leaseToken; }
     public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
+    public Instant getNextAttemptAt() { return nextAttemptAt; }
 }

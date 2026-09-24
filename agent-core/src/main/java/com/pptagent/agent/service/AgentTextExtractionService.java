@@ -64,6 +64,10 @@ public class AgentTextExtractionService {
         return new ExtractedDocument(sourceHash, "parser-v2", List.copyOf(blocks), List.of());
     }
 
+    public byte[] loadSourceBytes(FileAssetEntity asset) {
+        return objectStorageClient.getObjectBytes(asset.getObjectKey());
+    }
+
     private List<SourceBlock> extractDocxBlocks(byte[] bytes) {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
             List<SourceBlock> blocks = new ArrayList<>();

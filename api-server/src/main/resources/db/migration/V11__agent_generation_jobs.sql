@@ -26,6 +26,7 @@ create table agent_generation_page_tasks (
     failure_reason longtext null,
     created_at timestamp not null,
     updated_at timestamp not null,
+    next_attempt_at timestamp null,
     unique key uk_generation_page (generation_job_id, page_id),
     key idx_generation_page_status (generation_job_id, status, page_order)
 );

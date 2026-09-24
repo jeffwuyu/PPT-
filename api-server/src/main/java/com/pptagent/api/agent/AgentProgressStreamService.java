@@ -55,6 +55,11 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         return emitter;
     }
 
+    public long currentWatermark() {
+        Long latest = jdbcTemplate.queryForObject("select coalesce(max(id), 0) from agent_progress_events", Long.class);
+        return latest == null ? 0L : latest;
+    }
+
     public List<AgentProgressEvent> replayAfter(Long jobId, String lastEventId) {
         if (lastEventId == null || lastEventId.isBlank()) return List.of();
         long cursor;
@@ -62,6 +67,11 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
             cursor = Long.parseLong(lastEventId);
         } catch (NumberFormatException exception) {
             throw new CursorExpiredException("Event cursor is invalid; a fresh snapshot is required");
+        }
+        Integer cursorJob = jdbcTemplate.queryForObject("select count(*) from agent_progress_events where id = ? and job_id = ?",
+                Integer.class, cursor, jobId);
+        if (cursor > 0 && (cursorJob == null || cursorJob == 0)) {
+            throw new CursorExpiredException("Event cursor does not belong to this job");
         }
         List<AgentProgressEvent> events = jdbcTemplate.query("select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
                         + "from agent_progress_events where job_id = ? and id > ? order by id limit 501",
