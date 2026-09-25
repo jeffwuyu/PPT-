@@ -30,6 +30,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class SourceParseService {
@@ -109,9 +112,10 @@ public class SourceParseService {
     @Transactional
     public void process(Long parseJobId) {
         AgentParseJobEntity parseJob = parseJobs.selectById(parseJobId);
-        if (parseJob == null || !("QUEUED".equals(parseJob.getStatus()) || "RUNNING".equals(parseJob.getStatus()))) return;
-        parseJob.markRunning();
-        parseJobs.updateById(parseJob);
+        if (parseJob == null || !"QUEUED".equals(parseJob.getStatus())) return;
+        String leaseToken = UUID.randomUUID().toString();
+        if (parseJobs.claimQueued(parseJobId, leaseToken, Instant.now().plus(Duration.ofMinutes(5))) != 1) return;
+        parseJob = parseJobs.selectById(parseJobId);
         FileAssetEntity file = files.findWithOwnerById(parseJob.getFileAssetId()).orElse(null);
         if (file == null) {
             parseJob.fail("SOURCE_FILE_NOT_FOUND");

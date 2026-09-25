@@ -18,6 +18,8 @@ public class AgentParseJobEntity {
     private String sourceHash;
     private int totalBlocks;
     private long revision;
+    private String leaseToken;
+    private Instant leaseExpiresAt;
     private String failureReason;
     private Instant createdAt;
     private Instant updatedAt;
@@ -45,6 +47,8 @@ public class AgentParseJobEntity {
     public String getSourceHash() { return sourceHash; }
     public int getTotalBlocks() { return totalBlocks; }
     public long getRevision() { return revision; }
+    public String getLeaseToken() { return leaseToken; }
+    public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
     public String getFailureReason() { return failureReason; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -63,6 +67,12 @@ public class AgentParseJobEntity {
         this.status = "RUNNING";
         this.revision++;
         this.updatedAt = Instant.now();
+    }
+
+    public void claim(String token, Instant expiresAt) {
+        this.leaseToken = token;
+        this.leaseExpiresAt = expiresAt;
+        markRunning();
     }
 
     public void markOcrRequired() {
