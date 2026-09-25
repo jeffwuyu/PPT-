@@ -27,6 +27,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.time.Instant;
 import java.util.concurrent.RejectedExecutionException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @Service
 public class AgentGenerationService {
@@ -65,6 +68,8 @@ public class AgentGenerationService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "Agent plan must be approved before generation"));
         if (plan.getApprovedOutlineRevision() == null
                 || plan.getApprovedOutlineRevision() != plan.getOutlineRevision()
+                || plan.getApprovedOutlineHash() == null
+                || !plan.getApprovedOutlineHash().equals(sha256(plan.getApprovedOutlineJson()))
                 || !checkpoints.existsForJob(agentJobId)) {
             throw new PlatformException(ErrorCode.CONFLICT, "Current outline revision must be approved before generation");
         }
@@ -186,4 +191,13 @@ public class AgentGenerationService {
     }
 
     private record Page(String id, int order) { }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
+        }
+    }
 }

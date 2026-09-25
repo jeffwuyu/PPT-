@@ -20,6 +20,7 @@ public class AgentPlanEntity {
     /** Immutable approved outline snapshot used by generation. */
     private String approvedOutlineJson;
     private Integer approvedOutlineRevision;
+    private String approvedOutlineHash;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -73,6 +74,10 @@ public class AgentPlanEntity {
         return approvedOutlineRevision;
     }
 
+    public String getApprovedOutlineHash() {
+        return approvedOutlineHash;
+    }
+
     public void initializeOutline(String outlineJson) {
         this.outlineJson = outlineJson;
         this.outlineRevision = 1;
@@ -80,8 +85,13 @@ public class AgentPlanEntity {
     }
 
     public void approveOutline() {
+        approveOutline(null);
+    }
+
+    public void approveOutline(String outlineHash) {
         this.approvedOutlineJson = this.outlineJson;
         this.approvedOutlineRevision = this.outlineRevision;
+        this.approvedOutlineHash = outlineHash;
         this.updatedAt = Instant.now();
     }
 

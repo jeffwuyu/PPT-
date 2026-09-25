@@ -50,6 +50,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @Service
 public class AgentJobService {
@@ -175,7 +178,8 @@ public class AgentJobService {
             throw new PlatformException(ErrorCode.CONFLICT, "Approved outline is immutable after generation starts");
         }
         AgentPlanEntity plan = latestPlan(job.getId());
-        plan.approveOutline();
+        validateOutline(job.getId(), jsonService.fromJson(plan.getOutlineJson()));
+        plan.approveOutline(sha256(plan.getOutlineJson()));
         planRepository.updateById(plan);
         ensureCheckpointsFromApprovedOutline(job, plan);
         job.changeStatus(AgentJobStatus.PLANNED);
@@ -201,14 +205,14 @@ public class AgentJobService {
         if (checkpointRepository.existsForJob(job.getId())) {
             throw new PlatformException(ErrorCode.CONFLICT, "Outline is immutable after it has been approved for execution");
         }
-        validateOutline(request.outline());
+        validateOutline(job.getId(), request.outline());
         int updated = planRepository.updateOutlineIfRevision(plan.getId(), request.expectedRevision(), request.outline().toString());
         if (updated != 1) {
             throw new PlatformException(ErrorCode.CONFLICT, "Outline revision is stale");
         }
         AgentPlanEntity current = latestPlan(job.getId());
         if (Boolean.TRUE.equals(request.approve())) {
-            current.approveOutline();
+            current.approveOutline(sha256(current.getOutlineJson()));
             planRepository.updateById(current);
             ensureCheckpointsFromApprovedOutline(job, current);
         }
@@ -582,12 +586,16 @@ public class AgentJobService {
         return jsonService.toJson(outline);
     }
 
-    private void validateOutline(JsonNode outline) {
+    private void validateOutline(Long jobId, JsonNode outline) {
         if (outline == null || !outline.isObject() || !outline.path("pages").isArray()) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline must contain a pages array");
         }
         java.util.Set<String> pageIds = new java.util.HashSet<>();
         int order = 1;
+        java.util.Set<String> availableSourceBlocks = availableSourceBlocks(jobId);
+        if (outline.path("pages").size() < 1 || outline.path("pages").size() > agentProperties.maxPlanSlides()) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page count is outside the allowed range");
+        }
         for (JsonNode page : outline.path("pages")) {
             String pageId = page.path("pageId").asText("").trim();
             if (pageId.isBlank() || !pageIds.add(pageId)) {
@@ -596,10 +604,44 @@ public class AgentJobService {
             if (page.path("title").asText("").isBlank() || page.path("objective").asText("").isBlank()) {
                 throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page title and objective are required");
             }
+            if (!page.path("keyPoints").isArray() || page.path("keyPoints").size() == 0) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline keyPoints are required");
+            }
+            if (!page.path("sourceBlockIds").isArray()) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline sourceBlockIds must be an array");
+            }
+            for (JsonNode sourceId : page.path("sourceBlockIds")) {
+                if (!availableSourceBlocks.contains(sourceId.asText())) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "Outline references an unavailable source block");
+                }
+            }
             if (page.has("order") && page.path("order").asInt(order) != order) {
                 throw new PlatformException(ErrorCode.BAD_REQUEST, "Outline page order must be contiguous");
             }
             order++;
+        }
+    }
+
+    private java.util.Set<String> availableSourceBlocks(Long jobId) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (AgentSourceEntity source : sourceRepository.findByJobId(jobId)) {
+            if (source.getSourceType() != AgentSourceType.FILE) continue;
+            JsonNode blocks = jsonService.fromJson(source.getMetadataJson()).path("blocks");
+            if (!blocks.isArray()) continue;
+            blocks.forEach(block -> {
+                String id = block.path("blockId").asText("");
+                if (!id.isBlank()) ids.add(id);
+            });
+        }
+        return ids;
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
         }
     }
 
