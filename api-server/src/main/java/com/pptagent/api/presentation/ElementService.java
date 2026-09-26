@@ -33,6 +33,7 @@ public class ElementService {
     private final PresentationOrderService orderService;
     private final ElementValidationService elementValidationService;
     private final PresentationResponseMapper responseMapper;
+    private final SlideService slideService;
 
     public ElementService(
             SlideElementRepository slideElementRepository,
@@ -42,7 +43,8 @@ public class ElementService {
             PresentationJsonService jsonService,
             PresentationOrderService orderService,
             ElementValidationService elementValidationService,
-            PresentationResponseMapper responseMapper
+            PresentationResponseMapper responseMapper,
+            SlideService slideService
     ) {
         this.slideElementRepository = slideElementRepository;
         this.slideRepository = slideRepository;
@@ -52,6 +54,7 @@ public class ElementService {
         this.orderService = orderService;
         this.elementValidationService = elementValidationService;
         this.responseMapper = responseMapper;
+        this.slideService = slideService;
     }
 
     @Transactional
@@ -161,7 +164,56 @@ public class ElementService {
             if (previous != null) return previous;
         }
         List<PresentationRequests.AiElementEdit> edits = request.edits();
-        if (edits == null || edits.isEmpty()) {
+        if (edits == null) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "AI edit command must contain at least one element");
+        }
+
+        // Slide and presentation commands are deliberately handled in this same
+        // transactional service so they cannot bypass access, revision and
+        // idempotency protection used by element edits.
+        if ("ADD_SLIDE".equals(command)) {
+            if (request.expectedPresentationRevision() == null) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "expectedPresentationRevision is required");
+            }
+            PresentationEntity presentation = accessService.loadPresentationForEdit(userId, presentationId);
+            requirePresentationRevision(presentation, request.expectedPresentationRevision());
+            slideService.createSlide(userId, presentationId, new PresentationRequests.CreateSlideRequest(
+                    request.slidePageOrder(), request.slideTitle() == null ? "AI 页面" : request.slideTitle(),
+                    null, null));
+            List<PresentationResponse.ElementResponse> result = List.of();
+            cacheAiMutation(userId, presentationId, mutationId, result);
+            return result;
+        }
+        if ("DELETE_SLIDE".equals(command)) {
+            if (request.slideId() == null || request.expectedSlideRevision() == null || request.expectedPresentationRevision() == null) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "slideId and expected revisions are required");
+            }
+            PresentationEntity presentation = accessService.loadPresentationForEdit(userId, presentationId);
+            requirePresentationRevision(presentation, request.expectedPresentationRevision());
+            SlideEntity slide = accessService.loadSlideForEdit(userId, request.slideId());
+            if (!presentationId.equals(slide.getPresentationId()) || !slide.matchesRevision(request.expectedSlideRevision())) {
+                throw new PlatformException(ErrorCode.CONFLICT, "Slide revision changed; reload before deleting");
+            }
+            slideService.deleteSlide(userId, request.slideId());
+            List<PresentationResponse.ElementResponse> result = List.of();
+            cacheAiMutation(userId, presentationId, mutationId, result);
+            return result;
+        }
+        if ("CHANGE_THEME".equals(command)) {
+            if (request.expectedPresentationRevision() == null || request.theme() == null) {
+                throw new PlatformException(ErrorCode.BAD_REQUEST, "theme and expectedPresentationRevision are required");
+            }
+            PresentationEntity presentation = accessService.loadPresentationForEdit(userId, presentationId);
+            requirePresentationRevision(presentation, request.expectedPresentationRevision());
+            presentation.update(presentation.getTitle(), presentation.getPageWidth(), presentation.getPageHeight(),
+                    jsonService.toJson(request.theme()));
+            presentation.incrementRevision();
+            presentationRepository.updateById(presentation);
+            List<PresentationResponse.ElementResponse> result = List.of();
+            cacheAiMutation(userId, presentationId, mutationId, result);
+            return result;
+        }
+        if (edits.isEmpty()) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "AI edit command must contain at least one element");
         }
         List<SlideElementEntity> targets = edits.stream().map(edit -> accessService.loadElementForEdit(userId, edit.elementId())).toList();
@@ -194,7 +246,7 @@ public class ElementService {
         List<PresentationResponse.ElementResponse> result = targets.stream()
                 .map(element -> responseMapper.toElementResponse(element, true)).toList();
         if (mutationId != null && !mutationId.isBlank()) {
-            aiMutationResults.put(userId + ":" + presentationId + ":" + mutationId, result);
+            cacheAiMutation(userId, presentationId, mutationId, result);
         }
         java.util.Set<Long> changedSlides = targets.stream().map(SlideElementEntity::getSlideId).collect(java.util.stream.Collectors.toSet());
         for (Long slideId : changedSlides) {
@@ -208,6 +260,19 @@ public class ElementService {
         presentation.incrementRevision();
         presentationRepository.updateById(presentation);
         return result;
+    }
+
+    private void requirePresentationRevision(PresentationEntity presentation, int expectedRevision) {
+        if (!presentation.matchesRevision(expectedRevision)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "Presentation revision changed; reload before AI editing");
+        }
+    }
+
+    private void cacheAiMutation(Long userId, Long presentationId, String mutationId,
+                                 List<PresentationResponse.ElementResponse> result) {
+        if (mutationId != null && !mutationId.isBlank()) {
+            aiMutationResults.put(userId + ":" + presentationId + ":" + mutationId, result);
+        }
     }
 
     @Transactional

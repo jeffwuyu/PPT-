@@ -5,6 +5,7 @@ import com.pptagent.api.presentation.dto.PresentationResponse;
 import com.pptagent.domain.presentation.PresentationEntity;
 import com.pptagent.domain.presentation.SlideEntity;
 import com.pptagent.domain.presentation.repository.SlideElementRepository;
+import com.pptagent.domain.presentation.repository.PresentationRepository;
 import com.pptagent.domain.presentation.repository.SlideRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,7 @@ public class SlideService {
 
     private final SlideRepository slideRepository;
     private final SlideElementRepository slideElementRepository;
+    private final PresentationRepository presentationRepository;
     private final PresentationAccessService accessService;
     private final PresentationJsonService jsonService;
     private final PresentationOrderService orderService;
@@ -24,6 +26,7 @@ public class SlideService {
     public SlideService(
             SlideRepository slideRepository,
             SlideElementRepository slideElementRepository,
+            PresentationRepository presentationRepository,
             PresentationAccessService accessService,
             PresentationJsonService jsonService,
             PresentationOrderService orderService,
@@ -31,6 +34,7 @@ public class SlideService {
     ) {
         this.slideRepository = slideRepository;
         this.slideElementRepository = slideElementRepository;
+        this.presentationRepository = presentationRepository;
         this.accessService = accessService;
         this.jsonService = jsonService;
         this.orderService = orderService;
@@ -50,6 +54,10 @@ public class SlideService {
         slideRepository.insert(slide);
         List<SlideEntity> slides = slideRepository.findByPresentationIdOrderByPageOrderAsc(presentationId);
         orderService.reorderSlideWithTarget(slides, slide, request.pageOrder());
+        presentation.incrementRevision();
+        // Presentation revision changes whenever its page set changes so AI and
+        // manual commands share one optimistic concurrency boundary.
+        presentationRepository.updateById(presentation);
         return responseMapper.buildPresentationResponse(presentation, false);
     }
 
@@ -63,6 +71,8 @@ public class SlideService {
             List<SlideEntity> slides = slideRepository.findByPresentationIdOrderByPageOrderAsc(slide.getPresentation().getId());
             orderService.reorderSlideWithTarget(slides, slide, request.pageOrder());
         }
+        slide.getPresentation().incrementRevision();
+        presentationRepository.updateById(slide.getPresentation());
         return responseMapper.buildPresentationResponse(slide.getPresentation(), false);
     }
 
@@ -80,6 +90,8 @@ public class SlideService {
         slide.markDeleted();
         slideRepository.updateById(slide);
         orderService.normalizeSlideOrders(remaining);
+        presentation.incrementRevision();
+        presentationRepository.updateById(presentation);
         return responseMapper.buildPresentationResponse(presentation, false);
     }
 }

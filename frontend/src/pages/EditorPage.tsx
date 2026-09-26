@@ -28,10 +28,15 @@ export default function EditorPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const collaborationRef = useRef<CollaborationClient | null>(null);
+  const elementSaveQueue = useRef(new Map<number, { timer: number; element: SlideElement }>());
 
   useEffect(() => {
     void load();
-    return () => collaborationRef.current?.close();
+    return () => {
+      collaborationRef.current?.close();
+      elementSaveQueue.current.forEach(({ timer }) => window.clearTimeout(timer));
+      elementSaveQueue.current.clear();
+    };
   }, [presentationId]);
 
   useEffect(() => {
@@ -174,9 +179,27 @@ export default function EditorPage() {
   }
 
   async function commitElement(element: SlideElement) {
-    const saved = await updateElement(element);
-    changeElement(saved);
-    setSelectedElementId(saved.id);
+    const previous = elementSaveQueue.current.get(element.id);
+    if (previous) {
+      window.clearTimeout(previous.timer);
+    }
+    const timer = window.setTimeout(() => {
+      const queued = elementSaveQueue.current.get(element.id);
+      if (!queued) return;
+      elementSaveQueue.current.delete(element.id);
+      void updateElement(queued.element)
+        .then((saved) => {
+          changeElement(saved);
+          setSelectedElementId(saved.id);
+        })
+        .catch((exception) => {
+          // Keep the optimistic local value in the editor. A 409 pauses this
+          // element's queue until the user reloads/merges, so newer keystrokes
+          // are never silently overwritten by an out-of-order response.
+          setError(exception instanceof Error ? exception.message : '保存元素失败，请重新加载后合并草稿');
+        });
+    }, 500);
+    elementSaveQueue.current.set(element.id, { timer, element });
   }
 
   function updateSelected(patch: Partial<SlideElement>) {

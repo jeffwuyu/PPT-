@@ -115,10 +115,15 @@ public final class PresentationRequests {
             String command,
             String clientMutationId,
             String idempotencyKey,
-            Integer expectedPresentationRevision
+            Integer expectedPresentationRevision,
+            Long slideId,
+            Integer expectedSlideRevision,
+            String slideTitle,
+            Integer slidePageOrder,
+            JsonNode theme
     ) {
         public AiEditRequest(List<AiElementEdit> edits) {
-            this(edits, "POLISH_TEXT", null, null, null);
+            this(edits, "POLISH_TEXT", null, null, null, null, null, null, null, null);
         }
     }
 
