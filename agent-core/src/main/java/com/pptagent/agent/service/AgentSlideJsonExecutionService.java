@@ -76,6 +76,14 @@ public class AgentSlideJsonExecutionService {
 
     public Long createSlideArtifact(AgentJobEntity job, AgentCheckpointEntity checkpoint, int iteration,
                                     String titleOverride, JsonNode approvedPage) {
+        // Retries of the same generation page must reuse the existing artifact
+        // instead of creating a second slide after a provider/local commit
+        // ambiguity.
+        for (AgentArtifactRefEntity ref : artifactRefRepository.findActiveByCheckpoint(checkpoint.getId())) {
+            if (ref.getArtifactType() == AgentArtifactType.SLIDE && ref.getArtifactId() != null) {
+                return ref.getArtifactId();
+            }
+        }
         PresentationEntity presentation = presentationRepository.selectById(job.getPresentationId());
         if (presentation == null) {
             throw new SlideValidationException("Presentation not found while generating slide JSON");
