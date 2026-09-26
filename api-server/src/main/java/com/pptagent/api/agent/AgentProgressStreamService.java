@@ -73,7 +73,7 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         if (cursor > 0 && (cursorJob == null || cursorJob == 0)) {
             throw new CursorExpiredException("Event cursor does not belong to this job");
         }
-        List<AgentProgressEvent> events = jdbcTemplate.query("select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
+        List<AgentProgressEvent> events = jdbcTemplate.query("select id, event_id, job_id, presentation_id, checkpoint_id, page_id, aggregate_revision, event_type, event_data, occurred_at "
                         + "from agent_progress_events where job_id = ? and id > ? order by id limit 501",
                 (rs, rowNum) -> mapEvent(rs), jobId, cursor);
         if (events.size() > 500) {
@@ -90,6 +90,8 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         data.put("jobId", event.jobId());
         data.put("presentationId", event.presentationId());
         data.put("checkpointId", event.checkpointId());
+        data.put("pageId", event.pageId());
+        data.put("aggregateRevision", event.aggregateRevision());
         data.put("timestamp", event.timestamp());
         data.put("data", event.data());
         try {
@@ -124,15 +126,19 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
     public void publish(AgentProgressEvent event) {
         Long sequence = jdbcTemplate.execute((ConnectionCallback<Long>) connection -> {
             try (var statement = connection.prepareStatement(
-                    "insert into agent_progress_events (job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at) values (?, ?, ?, ?, ?, ?)",
+                    "insert into agent_progress_events (event_id, job_id, presentation_id, checkpoint_id, page_id, aggregate_revision, event_type, event_data, occurred_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     java.sql.Statement.RETURN_GENERATED_KEYS)) {
-                statement.setLong(1, event.jobId());
-                statement.setLong(2, event.presentationId());
-                if (event.checkpointId() == null) statement.setNull(3, java.sql.Types.BIGINT);
-                else statement.setLong(3, event.checkpointId());
-                statement.setString(4, event.type());
-                statement.setString(5, objectMapper.writeValueAsString(event.data()));
-                statement.setTimestamp(6, Timestamp.from(event.timestamp()));
+                statement.setString(1, event.eventId());
+                statement.setLong(2, event.jobId());
+                statement.setLong(3, event.presentationId());
+                if (event.checkpointId() == null) statement.setNull(4, java.sql.Types.BIGINT);
+                else statement.setLong(4, event.checkpointId());
+                statement.setString(5, event.pageId());
+                if (event.aggregateRevision() == null) statement.setNull(6, java.sql.Types.BIGINT);
+                else statement.setLong(6, event.aggregateRevision());
+                statement.setString(7, event.type());
+                statement.setString(8, objectMapper.writeValueAsString(event.data()));
+                statement.setTimestamp(9, Timestamp.from(event.timestamp()));
                 statement.executeUpdate();
                 try (var keys = statement.getGeneratedKeys()) {
                     return keys.next() ? keys.getLong(1) : null;
@@ -142,8 +148,9 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
             }
         });
         if (sequence == null) throw new IllegalStateException("Database did not return an event cursor");
-        AgentProgressEvent sequenced = new AgentProgressEvent(String.valueOf(sequence), sequence, event.type(),
-                event.jobId(), event.presentationId(), event.checkpointId(), event.data(), event.timestamp());
+        AgentProgressEvent sequenced = new AgentProgressEvent(event.eventId(), sequence, event.type(),
+                event.jobId(), event.presentationId(), event.checkpointId(), event.data(), event.timestamp(),
+                event.pageId(), event.aggregateRevision());
         Runnable dispatch = () -> relay(sequenced);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -166,7 +173,7 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
     public void relayPersistedEvents() {
         synchronized (relayLock) {
             List<AgentProgressEvent> events = jdbcTemplate.query(
-                    "select id, job_id, presentation_id, checkpoint_id, event_type, event_data, occurred_at "
+                    "select id, event_id, job_id, presentation_id, checkpoint_id, page_id, aggregate_revision, event_type, event_data, occurred_at "
                             + "from agent_progress_events where id > ? order by id limit 200",
                     (rs, rowNum) -> mapEvent(rs), lastRelayedSequence.get());
             for (AgentProgressEvent event : events) {
@@ -196,6 +203,8 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         data.put("jobId", sequenced.jobId());
         data.put("presentationId", sequenced.presentationId());
         data.put("checkpointId", sequenced.checkpointId());
+        data.put("pageId", sequenced.pageId());
+        data.put("aggregateRevision", sequenced.aggregateRevision());
         data.put("timestamp", sequenced.timestamp());
         data.put("data", sequenced.data());
         for (SseEmitter emitter : emitters) {
@@ -220,9 +229,12 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
         Long checkpointId = rs.wasNull() ? null : checkpoint;
         try {
             Map<String, Object> data = objectMapper.readValue(rs.getString("event_data"), new TypeReference<>() { });
-            return new AgentProgressEvent(String.valueOf(id), id, rs.getString("event_type"),
+            long aggregateRevision = rs.getLong("aggregate_revision");
+            Long revision = rs.wasNull() ? null : aggregateRevision;
+            String eventId = rs.getString("event_id");
+            return new AgentProgressEvent(eventId == null ? String.valueOf(id) : eventId, id, rs.getString("event_type"),
                     rs.getLong("job_id"), rs.getLong("presentation_id"), checkpointId, data,
-                    rs.getTimestamp("occurred_at").toInstant());
+                    rs.getTimestamp("occurred_at").toInstant(), rs.getString("page_id"), revision);
         } catch (IOException exception) {
             throw new SQLException("Stored agent progress event is invalid", exception);
         }
