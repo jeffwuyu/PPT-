@@ -95,10 +95,12 @@ public class AgentGenerationWorker {
                         .anyMatch(page -> "SUCCEEDED".equals(page.getStatus()));
                 boolean anyFailed = pageTasks.findByGenerationJobId(generationJobId).stream()
                         .anyMatch(page -> "FAILED".equals(page.getStatus()));
+                boolean anyUnknown = pageTasks.findByGenerationJobId(generationJobId).stream()
+                        .anyMatch(page -> "UNKNOWN".equals(page.getStatus()));
                 if (anySucceeded) agentJobService.completeGeneration(ownerUserId, agentJobId, generationJobId);
                 finish(generationJobId, ownerUserId,
-                        anyFailed && anySucceeded ? "PARTIAL_FAILED" : anyFailed ? "FAILED" : "SUCCEEDED",
-                        anyFailed ? "One or more pages exhausted their retry budget" : null);
+                        anyUnknown ? "UNKNOWN" : anyFailed && anySucceeded ? "PARTIAL_FAILED" : anyFailed ? "FAILED" : "SUCCEEDED",
+                        anyUnknown ? "One or more pages have an uncertain provider result" : anyFailed ? "One or more pages exhausted their retry budget" : null);
             } catch (RuntimeException exception) {
                 finish(generationJobId, ownerUserId, "FAILED", exception.getMessage());
             }

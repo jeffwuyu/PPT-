@@ -53,13 +53,20 @@ public class AgentGenerationPageLifecycleService {
         AgentGenerationPageTaskEntity current = pages.selectById(pageTaskId);
         if (current == null || !"RUNNING".equals(current.getStatus())
                 || !leaseToken.equals(current.getLeaseToken())) return false;
-        boolean terminal = current.getAttempts() >= MAX_ATTEMPTS;
+        String normalizedReason = reason == null ? "" : reason.toLowerCase(java.util.Locale.ROOT);
+        // A provider may have completed after the local transaction failed. Do
+        // not blindly replay a non-idempotent request; surface the uncertainty
+        // for reconciliation instead.
+        boolean unknown = normalizedReason.contains("unknown")
+                || normalizedReason.contains("persist")
+                || normalizedReason.contains("commit");
+        boolean terminal = unknown || current.getAttempts() >= MAX_ATTEMPTS;
         Instant now = Instant.now();
         Instant retryAt = terminal ? null : now.plusSeconds(Math.min(60, 2L << Math.max(0, current.getAttempts() - 1)));
         int updated = pages.update(null, new UpdateWrapper<AgentGenerationPageTaskEntity>()
                 .eq("id", pageTaskId).eq("generation_job_id", generationJobId)
                 .eq("status", "RUNNING").eq("lease_token", leaseToken)
-                .set("status", terminal ? "FAILED" : "PENDING")
+                .set("status", unknown ? "UNKNOWN" : terminal ? "FAILED" : "PENDING")
                 .set("lease_token", null).set("lease_expires_at", null)
                 .set("next_attempt_at", retryAt).set("failure_reason", reason)
                 .set("updated_at", now));
