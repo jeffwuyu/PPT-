@@ -47,6 +47,7 @@ public class AgentTextExtractionService {
         byte[] bytes = objectStorageClient.getObjectBytes(asset.getObjectKey());
         String extension = extension(asset.getOriginalFilename());
         String contentType = asset.getContentType() == null ? "" : asset.getContentType().toLowerCase(Locale.ROOT);
+        validateMagic(bytes, extension, contentType);
         List<SourceBlock> blocks;
         if ("docx".equals(extension) || contentType.contains("wordprocessingml")) {
             blocks = extractDocxBlocks(bytes);
@@ -62,6 +63,30 @@ public class AgentTextExtractionService {
         }
         String sourceHash = sha256(bytes);
         return new ExtractedDocument(sourceHash, "parser-v2", List.copyOf(blocks), List.of());
+    }
+
+    private void validateMagic(byte[] bytes, String extension, String contentType) {
+        if (bytes == null || bytes.length == 0) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "DOCUMENT_CORRUPTED");
+        }
+        boolean pdf = "pdf".equals(extension) || contentType.contains("pdf");
+        boolean docx = "docx".equals(extension) || contentType.contains("wordprocessingml");
+        if (pdf && !startsWith(bytes, new byte[]{'%', 'P', 'D', 'F', '-'})) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "DOCUMENT_CORRUPTED");
+        }
+        // DOCX is an OOXML zip package. Checking the PK header catches MIME
+        // spoofing before Apache POI or OCR work is started.
+        if (docx && !startsWith(bytes, new byte[]{'P', 'K', 3, 4})) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "DOCUMENT_CORRUPTED");
+        }
+    }
+
+    private boolean startsWith(byte[] value, byte[] prefix) {
+        if (value.length < prefix.length) return false;
+        for (int index = 0; index < prefix.length; index++) {
+            if (value[index] != prefix[index]) return false;
+        }
+        return true;
     }
 
     public byte[] loadSourceBytes(FileAssetEntity asset) {
