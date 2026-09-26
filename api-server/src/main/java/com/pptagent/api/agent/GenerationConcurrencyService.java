@@ -2,6 +2,7 @@ package com.pptagent.api.agent;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -10,8 +11,17 @@ import java.util.UUID;
 @Service
 public class GenerationConcurrencyService {
     private final JdbcTemplate jdbc;
+    private final int configuredLimit;
 
-    public GenerationConcurrencyService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public GenerationConcurrencyService(JdbcTemplate jdbc,
+                                        @Value("${ppt.agent.generation.model-concurrency:4}") int configuredLimit) {
+        this.jdbc = jdbc;
+        this.configuredLimit = Math.max(1, configuredLimit);
+    }
+
+    public String tryAcquire(long ttlSeconds) {
+        return tryAcquire(configuredLimit, ttlSeconds);
+    }
 
     @Transactional
     public String tryAcquire(int limit, long ttlSeconds) {

@@ -67,7 +67,7 @@ public class AgentGenerationWorker {
             String leaseToken = UUID.randomUUID().toString();
             if (pageTasks.claimPage(page.getId(), leaseToken, Instant.now().plus(Duration.ofSeconds(30))) != 1) continue;
             locallyOwnedPageLeases.put(page.getId(), leaseToken);
-            String modelSlot = concurrency.tryAcquire(4, 60);
+            String modelSlot = concurrency.tryAcquire(60);
             if (modelSlot == null) {
                 pageTasks.releaseClaim(page.getId(), leaseToken, Instant.now());
                 continue;
