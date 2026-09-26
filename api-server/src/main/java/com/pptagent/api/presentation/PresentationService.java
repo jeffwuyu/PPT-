@@ -114,6 +114,7 @@ public class PresentationService {
                 jsonService.positive(request.pageHeight(), "pageHeight"),
                 jsonService.toJson(jsonService.defaultObject(request.theme()))
         );
+        presentation.incrementRevision();
         presentationRepository.updateById(presentation);
         return responseMapper.buildPresentationResponse(presentation, false);
     }

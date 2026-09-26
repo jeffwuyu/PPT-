@@ -6,8 +6,10 @@ import com.pptagent.common.error.ErrorCode;
 import com.pptagent.common.error.PlatformException;
 import com.pptagent.domain.presentation.SlideElementEntity;
 import com.pptagent.domain.presentation.SlideEntity;
+import com.pptagent.domain.presentation.PresentationEntity;
 import com.pptagent.domain.presentation.repository.SlideElementRepository;
 import com.pptagent.domain.presentation.repository.SlideRepository;
+import com.pptagent.domain.presentation.repository.PresentationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ public class ElementService {
 
     private final SlideElementRepository slideElementRepository;
     private final SlideRepository slideRepository;
+    private final PresentationRepository presentationRepository;
     private final PresentationAccessService accessService;
     private final PresentationJsonService jsonService;
     private final PresentationOrderService orderService;
@@ -34,6 +37,7 @@ public class ElementService {
     public ElementService(
             SlideElementRepository slideElementRepository,
             SlideRepository slideRepository,
+            PresentationRepository presentationRepository,
             PresentationAccessService accessService,
             PresentationJsonService jsonService,
             PresentationOrderService orderService,
@@ -42,6 +46,7 @@ public class ElementService {
     ) {
         this.slideElementRepository = slideElementRepository;
         this.slideRepository = slideRepository;
+        this.presentationRepository = presentationRepository;
         this.accessService = accessService;
         this.jsonService = jsonService;
         this.orderService = orderService;
@@ -163,6 +168,12 @@ public class ElementService {
         if (targets.stream().anyMatch(element -> !element.getSlide().getPresentationId().equals(presentationId))) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "AI edit target does not belong to the requested presentation");
         }
+        if (request.expectedPresentationRevision() != null) {
+            int currentRevision = targets.get(0).getSlide().getPresentation().getRevision();
+            if (currentRevision != request.expectedPresentationRevision()) {
+                throw new PlatformException(ErrorCode.CONFLICT, "Presentation revision changed; reload before AI editing");
+            }
+        }
         for (int index = 0; index < edits.size(); index++) {
             PresentationRequests.AiElementEdit edit = edits.get(index);
             SlideElementEntity element = targets.get(index);
@@ -185,6 +196,17 @@ public class ElementService {
         if (mutationId != null && !mutationId.isBlank()) {
             aiMutationResults.put(userId + ":" + presentationId + ":" + mutationId, result);
         }
+        java.util.Set<Long> changedSlides = targets.stream().map(SlideElementEntity::getSlideId).collect(java.util.stream.Collectors.toSet());
+        for (Long slideId : changedSlides) {
+            SlideEntity changed = slideRepository.selectById(slideId);
+            if (changed != null) {
+                changed.incrementRevision();
+                slideRepository.updateById(changed);
+            }
+        }
+        PresentationEntity presentation = targets.get(0).getSlide().getPresentation();
+        presentation.incrementRevision();
+        presentationRepository.updateById(presentation);
         return result;
     }
 

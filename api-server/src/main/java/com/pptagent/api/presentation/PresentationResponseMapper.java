@@ -50,6 +50,7 @@ public class PresentationResponseMapper {
                 jsonService.fromJson(presentation.getThemeJson()),
                 presentation.getStatus(),
                 presentation.getCurrentVersionNumber(),
+                presentation.getRevision(),
                 slides
         );
     }
@@ -64,6 +65,7 @@ public class PresentationResponseMapper {
                 slide.getTitle(),
                 jsonService.fromJson(slide.getBackgroundJson()),
                 slide.getSpeakerNotes(),
+                slide.getRevision(),
                 elements
         );
     }

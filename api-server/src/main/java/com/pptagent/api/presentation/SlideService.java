@@ -57,6 +57,7 @@ public class SlideService {
     public PresentationResponse updateSlide(Long userId, Long slideId, PresentationRequests.UpdateSlideRequest request) {
         SlideEntity slide = accessService.loadSlideForEdit(userId, slideId);
         slide.update(request.title(), jsonService.toJson(jsonService.defaultObject(request.background())), request.speakerNotes());
+        slide.incrementRevision();
         slideRepository.updateById(slide);
         if (request.pageOrder() != null) {
             List<SlideEntity> slides = slideRepository.findByPresentationIdOrderByPageOrderAsc(slide.getPresentation().getId());

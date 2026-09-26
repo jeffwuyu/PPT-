@@ -21,6 +21,7 @@ public class PresentationEntity {
     private PresentationStatus status;
     // Phase 04：写入 PresentationVersion 快照前递增版本号。
     private int currentVersionNumber;
+    private int revision = 1;
     private Instant createdAt;
     private Instant updatedAt;
     private String isDeleted;
@@ -80,6 +81,10 @@ public class PresentationEntity {
     public int getCurrentVersionNumber() {
         return currentVersionNumber;
     }
+
+    public int getRevision() { return revision; }
+    public boolean matchesRevision(int expected) { return revision == expected; }
+    public void incrementRevision() { revision++; this.updatedAt = Instant.now(); }
 
     public Instant getCreatedAt() {
         return createdAt;

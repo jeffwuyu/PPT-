@@ -21,6 +21,7 @@ public class SlideEntity {
     private Instant createdAt;
     private Instant updatedAt;
     private String isDeleted;
+    private int revision = 1;
 
     @TableField(exist = false)
     private PresentationEntity presentation;
@@ -79,6 +80,10 @@ public class SlideEntity {
     public String getIsDeleted() {
         return isDeleted;
     }
+
+    public int getRevision() { return revision; }
+    public boolean matchesRevision(int expected) { return revision == expected; }
+    public void incrementRevision() { revision++; this.updatedAt = Instant.now(); }
 
     public void setPresentation(PresentationEntity presentation) {
         this.presentation = presentation;

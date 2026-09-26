@@ -114,10 +114,11 @@ public final class PresentationRequests {
             @NotNull List<@Valid AiElementEdit> edits,
             String command,
             String clientMutationId,
-            String idempotencyKey
+            String idempotencyKey,
+            Integer expectedPresentationRevision
     ) {
         public AiEditRequest(List<AiElementEdit> edits) {
-            this(edits, "POLISH_TEXT", null, null);
+            this(edits, "POLISH_TEXT", null, null, null);
         }
     }
 

@@ -16,8 +16,14 @@ public record PresentationResponse(
         JsonNode theme,
         PresentationStatus status,
         int currentVersionNumber,
+        int revision,
         List<SlideResponse> slides
 ) {
+    public PresentationResponse(Long id, Long ownerUserId, String title, int pageWidth, int pageHeight,
+                                JsonNode theme, PresentationStatus status, int currentVersionNumber,
+                                List<SlideResponse> slides) {
+        this(id, ownerUserId, title, pageWidth, pageHeight, theme, status, currentVersionNumber, 1, slides);
+    }
 
     // Phase 04：slides 与 elements 按 pageOrder 输出，用于标准预览和版本 JSON。
     public record SlideResponse(
@@ -26,8 +32,13 @@ public record PresentationResponse(
             String title,
             JsonNode background,
             String speakerNotes,
+            int revision,
             List<ElementResponse> elements
     ) {
+        public SlideResponse(Long id, int pageOrder, String title, JsonNode background,
+                             String speakerNotes, List<ElementResponse> elements) {
+            this(id, pageOrder, title, background, speakerNotes, 1, elements);
+        }
     }
 
     // Phase 04：预览响应会为 IMAGE 元素的 content 补充 publicUrl。
