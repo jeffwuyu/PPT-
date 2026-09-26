@@ -33,9 +33,18 @@ import java.util.Map;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class SourceParseService {
+    private final ScheduledExecutorService leaseRenewer = Executors.newScheduledThreadPool(1, runnable -> {
+        Thread thread = new Thread(runnable, "ppt-source-lease-renewer");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final FileAssetRepository files;
     private final AgentJobRepository jobs;
     private final AgentParseJobRepository parseJobs;
@@ -115,11 +124,15 @@ public class SourceParseService {
         if (parseJob == null || !"QUEUED".equals(parseJob.getStatus())) return;
         String leaseToken = UUID.randomUUID().toString();
         if (parseJobs.claimQueued(parseJobId, leaseToken, Instant.now().plus(Duration.ofMinutes(5))) != 1) return;
+        ScheduledFuture<?> renewTask = leaseRenewer.scheduleAtFixedRate(
+                () -> parseJobs.renewLease(parseJobId, leaseToken, Instant.now().plus(Duration.ofMinutes(5)), Instant.now()),
+                60, 60, TimeUnit.SECONDS);
         parseJob = parseJobs.selectById(parseJobId);
         FileAssetEntity file = files.findWithOwnerById(parseJob.getFileAssetId()).orElse(null);
         if (file == null) {
             parseJob.fail("SOURCE_FILE_NOT_FOUND");
             parseJobs.updateById(parseJob);
+            renewTask.cancel(false);
             return;
         }
         AgentJobEntity agentJob = parseJob.getAgentJobId() == null ? null
@@ -135,6 +148,9 @@ public class SourceParseService {
                 parseJob.markOcrRunning();
                 parseJobs.updateById(parseJob);
                 var ocr = ocrClient.recognize(extraction.loadSourceBytes(file), file.getOriginalFilename());
+                parseJob.setOcrMetadata(ocr.provider(), ocr.model(), ocr.requestId(),
+                        writeJson(ocr.pages().stream().map(page -> Map.of(
+                                "page", page.page(), "confidence", page.confidence())).toList()));
                 List<AgentTextExtractionService.SourceBlock> ocrBlocks = ocr.pages().stream()
                         .filter(page -> page.text() != null && !page.text().isBlank())
                         .map(page -> new AgentTextExtractionService.SourceBlock("page-" + page.page(), "paragraph", page.text(),
@@ -144,9 +160,18 @@ public class SourceParseService {
                 if (ocrBlocks.isEmpty()) throw new PlatformException(ErrorCode.BAD_REQUEST, "EMPTY_DOCUMENT");
                 document = new AgentTextExtractionService.ExtractedDocument("ocr", "ocr-v1", ocrBlocks, List.of());
             }
-            for (AgentTextExtractionService.SourceBlock block : document.blocks()) {
-                blocks.insert(new AgentSourceBlockEntity(parseJob.getId(), block.blockId(), block.type(), block.text(),
-                        writeJson(block.locator())));
+            var reusable = parseJobs.findSucceededBySource(parseJob.getOwnerUserId(), parseJob.getFileAssetId(),
+                    document.sourceHash(), document.parserVersion());
+            if (reusable.isPresent()) {
+                for (AgentSourceBlockEntity block : blocks.findByParseJobId(reusable.get().getId())) {
+                    blocks.insert(new AgentSourceBlockEntity(parseJob.getId(), block.getBlockId(), block.getBlockType(),
+                            block.getText(), block.getLocatorJson()));
+                }
+            } else {
+                for (AgentTextExtractionService.SourceBlock block : document.blocks()) {
+                    blocks.insert(new AgentSourceBlockEntity(parseJob.getId(), block.blockId(), block.type(), block.text(),
+                            writeJson(block.locator())));
+                }
             }
             if (agentJob != null) {
                 Map<String, Object> metadata = Map.of(
@@ -170,6 +195,7 @@ public class SourceParseService {
             parseJob.fail("DOCUMENT_CORRUPTED");
         }
         parseJobs.updateById(parseJob);
+        renewTask.cancel(false);
     }
 
     @Transactional(readOnly = true)
@@ -185,7 +211,8 @@ public class SourceParseService {
                         block.getText(), block.getLocatorJson()))
                 .toList();
         return new SourceParseResponse(job.getId(), job.getFileAssetId(), job.getAgentJobId(), job.getStatus(),
-                job.getRevision(), job.getParserVersion(), job.getSourceHash(), job.getTotalBlocks(),
+                job.getRevision(), job.getParserVersion(), job.getSourceHash(), job.getOcrProvider(),
+                job.getOcrModel(), job.getOcrRequestId(), job.getOcrConfidenceJson(), job.getTotalBlocks(),
                 job.getFailureReason(), result, job.getCreatedAt(), job.getUpdatedAt());
     }
 

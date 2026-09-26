@@ -29,4 +29,22 @@ public interface AgentParseJobRepository extends BaseMapper<AgentParseJobEntity>
                 .setSql("revision = revision + 1")
                 .set("updated_at", Instant.now()));
     }
+
+    default int renewLease(Long id, String leaseToken, Instant leaseExpiresAt, Instant now) {
+        return update(null, new UpdateWrapper<AgentParseJobEntity>()
+                .eq("id", id).eq("lease_token", leaseToken)
+                .in("status", "RUNNING", "OCR_REQUIRED", "OCR_RUNNING")
+                .gt("lease_expires_at", now)
+                .set("lease_expires_at", leaseExpiresAt)
+                .setSql("revision = revision + 1")
+                .set("updated_at", now));
+    }
+
+    default Optional<AgentParseJobEntity> findSucceededBySource(Long ownerUserId, Long fileAssetId,
+                                                                  String sourceHash, String parserVersion) {
+        return Optional.ofNullable(selectOne(new QueryWrapper<AgentParseJobEntity>()
+                .eq("owner_user_id", ownerUserId).eq("file_asset_id", fileAssetId)
+                .eq("source_hash", sourceHash).eq("parser_version", parserVersion)
+                .eq("status", "SUCCEEDED").orderByDesc("id").last("limit 1")));
+    }
 }

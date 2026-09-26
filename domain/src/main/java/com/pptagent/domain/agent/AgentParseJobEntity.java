@@ -21,6 +21,10 @@ public class AgentParseJobEntity {
     private String leaseToken;
     private Instant leaseExpiresAt;
     private String failureReason;
+    private String ocrProvider;
+    private String ocrModel;
+    private String ocrRequestId;
+    private String ocrConfidenceJson;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -50,6 +54,10 @@ public class AgentParseJobEntity {
     public String getLeaseToken() { return leaseToken; }
     public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
     public String getFailureReason() { return failureReason; }
+    public String getOcrProvider() { return ocrProvider; }
+    public String getOcrModel() { return ocrModel; }
+    public String getOcrRequestId() { return ocrRequestId; }
+    public String getOcrConfidenceJson() { return ocrConfidenceJson; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
@@ -59,6 +67,8 @@ public class AgentParseJobEntity {
         this.parserVersion = parserVersion;
         this.totalBlocks = totalBlocks;
         this.failureReason = null;
+        this.leaseToken = null;
+        this.leaseExpiresAt = null;
         this.revision++;
         this.updatedAt = Instant.now();
     }
@@ -87,9 +97,19 @@ public class AgentParseJobEntity {
         this.updatedAt = Instant.now();
     }
 
+    public void setOcrMetadata(String provider, String model, String requestId, String confidenceJson) {
+        this.ocrProvider = provider;
+        this.ocrModel = model;
+        this.ocrRequestId = requestId;
+        this.ocrConfidenceJson = confidenceJson;
+        this.updatedAt = Instant.now();
+    }
+
     public void fail(String reason) {
         this.status = "FAILED";
         this.failureReason = reason;
+        this.leaseToken = null;
+        this.leaseExpiresAt = null;
         this.revision++;
         this.updatedAt = Instant.now();
     }
