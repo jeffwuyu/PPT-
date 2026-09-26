@@ -110,7 +110,15 @@ public final class PresentationRequests {
     public record DeleteElementRequest(@NotNull Integer expectedRevision) {
     }
 
-    public record AiEditRequest(@NotNull List<@Valid AiElementEdit> edits) {
+    public record AiEditRequest(
+            @NotNull List<@Valid AiElementEdit> edits,
+            String command,
+            String clientMutationId,
+            String idempotencyKey
+    ) {
+        public AiEditRequest(List<AiElementEdit> edits) {
+            this(edits, "POLISH_TEXT", null, null);
+        }
     }
 
     public record AiElementEdit(

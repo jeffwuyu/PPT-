@@ -79,6 +79,6 @@ public class ElementController {
             @PathVariable Long presentationId,
             @Valid @RequestBody PresentationRequests.AiEditRequest request
     ) {
-        return ApiResponse.ok(elementService.applyAiEdits(user.id(), presentationId, request.edits()));
+        return ApiResponse.ok(elementService.applyAiEdits(user.id(), presentationId, request));
     }
 }

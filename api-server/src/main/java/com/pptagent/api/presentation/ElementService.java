@@ -14,9 +14,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ElementService {
+    private static final Set<String> AI_COMMANDS = Set.of("POLISH_TEXT", "ADD_SLIDE", "DELETE_SLIDE", "CHANGE_THEME", "RELAYOUT");
+    private final Map<String, List<PresentationResponse.ElementResponse>> aiMutationResults = new ConcurrentHashMap<>();
 
     private final SlideElementRepository slideElementRepository;
     private final SlideRepository slideRepository;
@@ -131,6 +136,26 @@ public class ElementService {
 
     @Transactional
     public List<PresentationResponse.ElementResponse> applyAiEdits(Long userId, Long presentationId, List<PresentationRequests.AiElementEdit> edits) {
+        return applyAiEdits(userId, presentationId,
+                new PresentationRequests.AiEditRequest(edits));
+    }
+
+    @Transactional
+    public List<PresentationResponse.ElementResponse> applyAiEdits(Long userId, Long presentationId,
+                                                                    PresentationRequests.AiEditRequest request) {
+        String command = request.command() == null || request.command().isBlank()
+                ? "POLISH_TEXT" : request.command().toUpperCase(Locale.ROOT);
+        if (!AI_COMMANDS.contains(command)) {
+            throw new PlatformException(ErrorCode.BAD_REQUEST, "Unsupported AI edit command");
+        }
+        String mutationId = request.clientMutationId() == null || request.clientMutationId().isBlank()
+                ? request.idempotencyKey() : request.clientMutationId();
+        if (mutationId != null && !mutationId.isBlank()) {
+            String cacheKey = userId + ":" + presentationId + ":" + mutationId;
+            List<PresentationResponse.ElementResponse> previous = aiMutationResults.get(cacheKey);
+            if (previous != null) return previous;
+        }
+        List<PresentationRequests.AiElementEdit> edits = request.edits();
         if (edits == null || edits.isEmpty()) {
             throw new PlatformException(ErrorCode.BAD_REQUEST, "AI edit command must contain at least one element");
         }
@@ -155,7 +180,12 @@ public class ElementService {
                 throw new PlatformException(ErrorCode.CONFLICT, "AI edit target changed during commit");
             }
         }
-        return targets.stream().map(element -> responseMapper.toElementResponse(element, true)).toList();
+        List<PresentationResponse.ElementResponse> result = targets.stream()
+                .map(element -> responseMapper.toElementResponse(element, true)).toList();
+        if (mutationId != null && !mutationId.isBlank()) {
+            aiMutationResults.put(userId + ":" + presentationId + ":" + mutationId, result);
+        }
+        return result;
     }
 
     @Transactional
