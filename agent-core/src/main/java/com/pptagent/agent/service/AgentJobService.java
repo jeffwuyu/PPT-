@@ -210,6 +210,8 @@ public class AgentJobService {
         if (updated != 1) {
             throw new PlatformException(ErrorCode.CONFLICT, "Outline revision is stale");
         }
+        planRevisionRepository.insert(new AgentPlanRevisionEntity(
+                job.getId(), plan.getId(), plan.getId(), "OUTLINE_EDIT", null));
         AgentPlanEntity current = latestPlan(job.getId());
         if (Boolean.TRUE.equals(request.approve())) {
             current.approveOutline(sha256(current.getOutlineJson()));
