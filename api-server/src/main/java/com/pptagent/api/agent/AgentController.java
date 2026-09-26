@@ -108,6 +108,11 @@ public class AgentController {
             }
         } catch (CursorExpiredException exception) {
             progressStreamService.sendCursorExpired(emitter, exception.getMessage());
+            // A stale cursor must be recoverable in one connection: return a
+            // fresh state plus its new watermark after the explicit signal.
+            progressStreamService.sendSnapshot(emitter, java.util.Map.of(
+                    "watermark", progressStreamService.currentWatermark(),
+                    "state", progressSnapshotService.snapshot(user.id(), id)));
         }
         return emitter;
     }

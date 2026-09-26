@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -72,6 +74,12 @@ public class AgentProgressStreamService implements AgentProgressPublisher {
                 Integer.class, cursor, jobId);
         if (cursor > 0 && (cursorJob == null || cursorJob == 0)) {
             throw new CursorExpiredException("Event cursor does not belong to this job");
+        }
+        Integer expired = jdbcTemplate.queryForObject(
+                "select count(*) from agent_progress_events where id = ? and occurred_at < ?",
+                Integer.class, cursor, Timestamp.from(Instant.now().minus(7, ChronoUnit.DAYS)));
+        if (expired != null && expired > 0) {
+            throw new CursorExpiredException("Event cursor is older than the 7-day retention window; a fresh snapshot is required");
         }
         List<AgentProgressEvent> events = jdbcTemplate.query("select id, event_id, job_id, presentation_id, checkpoint_id, page_id, aggregate_revision, event_type, event_data, occurred_at "
                         + "from agent_progress_events where job_id = ? and id > ? order by id limit 501",
